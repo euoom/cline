@@ -512,6 +512,7 @@ export class Controller {
 				await this.mode.waitForPendingRebuild()
 				await this.sessionRebuilds.waitUntilSettled()
 			},
+			runExclusive: (operation) => this.sessionRebuilds.runExclusive(operation),
 			getTask: () => this.task,
 			createTempSessionHost: () => VscodeSessionHost.create({ mcpHub: this.mcpHub }),
 			getWorkspaceRoot: () => this.getWorkspaceRoot(),
@@ -575,8 +576,13 @@ export class Controller {
 		this.compaction = new SdkCompactionCoordinator({
 			stateManager: this.stateManager,
 			sessions: this.sessions,
+			rebuilds: this.sessionRebuilds,
 			messages: this.messages,
+			taskHistory: this.taskHistory,
 			sessionConfigBuilder: this.sessionConfigBuilder,
+			getDisplayedTaskId: () => this.task?.taskId,
+			createTempSessionHost: () => VscodeSessionHost.create({ mcpHub: this.mcpHub }),
+			loadInitialMessages: (reader, taskId) => this.sessionHistory.loadInitialMessages(reader, taskId),
 			getWorkspaceRoot: () => this.getWorkspaceRoot(),
 			postStateToWebview: () => this.postStateToWebview(),
 		})
