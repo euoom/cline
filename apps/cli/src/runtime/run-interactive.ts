@@ -7,6 +7,8 @@ import {
 import { formatModeSwitchNotice } from "@cline/shared";
 import type { CliMigrationNotice } from "../kanban-migration/notice";
 import { logCliError } from "../logging/errors";
+import { exportHistorySession } from "../session/history-export";
+import { deleteSession } from "../session/session";
 import {
 	loadClineAccountSnapshot,
 	loadIndividualSubscriptionPlans,
@@ -69,6 +71,17 @@ type ModelChangeReasoningConfig = {
 	thinking?: boolean;
 	reasoningEffort?: Config["reasoningEffort"];
 };
+
+export function assertHistorySessionIsDeletable(
+	sessionId: string,
+	activeSessionId: string,
+): void {
+	if (activeSessionId && sessionId === activeSessionId) {
+		throw new Error(
+			"Cannot delete the active session. Start or resume another session first.",
+		);
+	}
+}
 
 export function resolveReasoningForModelChange(
 	config: ModelChangeReasoningConfig,
@@ -768,6 +781,19 @@ export async function runInteractive(
 				totalCost: usage.totalCost,
 				currentContextSize: getCurrentContextSize(messages),
 			};
+		},
+		onExportHistorySession: async (sessionId, format) =>
+			await exportHistorySession({
+				sessionId,
+				format,
+				outputDirectory: config.cwd,
+			}),
+		onDeleteHistorySession: async (sessionId) => {
+			assertHistorySessionIsDeletable(
+				sessionId,
+				sessionRuntime.getActiveSessionId(),
+			);
+			return (await deleteSession(sessionId)).deleted;
 		},
 		onCompact: async () => {
 			await sessionRuntime.ensureReady();
