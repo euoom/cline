@@ -187,6 +187,70 @@ export function buildConnectorConnectArgs(
 	return args;
 }
 
+/** Flags owned by the platform schema (fields + security), excluding CLI overrides. */
+export function knownConnectorArgFlags(
+	platform: ConnectorPlatformDef,
+): Set<string> {
+	const flags = new Set<string>();
+	for (const field of platform.fields) {
+		flags.add(field.flag);
+	}
+	if (platform.security) {
+		const placeholders: Record<string, string> = {};
+		for (const field of platform.security.fields) {
+			placeholders[field.key] = "placeholder";
+		}
+		for (const arg of platform.security.buildArgs(placeholders)) {
+			if (arg.startsWith("-")) {
+				flags.add(arg);
+			}
+		}
+	}
+	return flags;
+}
+
+/**
+ * Keep CLI-only reconnect flags (provider/model/cwd/mode/no-tools/...) when a
+ * dashboard configure rebuilds the platform/security portion of launch args.
+ */
+export function preserveConnectorPassthroughArgs(
+	platform: ConnectorPlatformDef,
+	rebuiltArgs: string[],
+	previousArgs: string[] | undefined,
+): string[] {
+	if (!previousArgs?.length) {
+		return rebuiltArgs;
+	}
+	const knownFlags = knownConnectorArgFlags(platform);
+	const passthrough: string[] = [];
+	for (let index = 0; index < previousArgs.length; index += 1) {
+		const arg = previousArgs[index];
+		if (!arg) {
+			continue;
+		}
+		if (arg.startsWith("-")) {
+			const next = previousArgs[index + 1];
+			const hasValue = next !== undefined && !next.startsWith("-");
+			if (knownFlags.has(arg)) {
+				if (hasValue) {
+					index += 1;
+				}
+				continue;
+			}
+			passthrough.push(arg);
+			if (hasValue) {
+				passthrough.push(next);
+				index += 1;
+			}
+			continue;
+		}
+		passthrough.push(arg);
+	}
+	return passthrough.length > 0
+		? [...rebuiltArgs, ...passthrough]
+		: rebuiltArgs;
+}
+
 export function connectorChannelsFromPlatforms(
 	platforms: ConnectorPlatformDef[] = CONNECTOR_PLATFORMS,
 ): ConnectorChannel[] {

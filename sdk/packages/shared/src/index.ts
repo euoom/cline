@@ -34,7 +34,9 @@ export {
 	CONNECTOR_CATALOG,
 	CONNECTOR_PLATFORMS,
 	connectorChannelsFromPlatforms,
+	knownConnectorArgFlags,
 	listConnectorCatalog,
+	preserveConnectorPassthroughArgs,
 	shouldIncludeConnectorField,
 } from "./connectors/platforms";
 export type {

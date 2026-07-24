@@ -112,6 +112,15 @@ describe("connector hub handlers", () => {
 				"123456:old-token",
 				"--allowed-user-id",
 				"1",
+				"--provider",
+				"cline",
+				"--model",
+				"openai/gpt-5.3-codex",
+				"--cwd",
+				"/repo",
+				"--mode",
+				"plan",
+				"--no-tools",
 			]);
 			store.setEnabled("telegram", false);
 		});
@@ -128,6 +137,15 @@ describe("connector hub handlers", () => {
 			"123456:rotated-token",
 			"--allowed-user-id",
 			"987654321",
+			"--provider",
+			"cline",
+			"--model",
+			"openai/gpt-5.3-codex",
+			"--cwd",
+			"/repo",
+			"--mode",
+			"plan",
+			"--no-tools",
 		]);
 		expect(persisted?.enabled).toBe(false);
 	});

@@ -7,6 +7,7 @@ import {
 	resolveSharedHubOwnerContext,
 } from "../discovery/workspace";
 import { startHubWebSocketServer } from "../server";
+import { reconnectPersistedConnectorsFromDaemon } from "./connector-reconnect";
 import { createHubDaemonTelemetry } from "./telemetry";
 
 initVcr(process.env.CLINE_VCR);
@@ -159,6 +160,14 @@ async function main(): Promise<void> {
 	});
 
 	resolveHubDaemonReady();
+	// Sole reconnect owner for every launch path (direct entry.ts/js spawn and
+	// host wrappers that import this module). Best-effort: never block daemon
+	// liveness on connector restoration.
+	void reconnectPersistedConnectorsFromDaemon().catch((error) => {
+		const message =
+			error instanceof Error ? error.stack || error.message : String(error);
+		process.stderr.write(`[hub-daemon] connectorAutostart: ${message}\n`);
+	});
 	await new Promise<void>(() => {
 		// keep daemon process alive
 	});

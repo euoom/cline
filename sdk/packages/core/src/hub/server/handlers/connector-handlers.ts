@@ -14,6 +14,7 @@ import {
 	CONNECTOR_PLATFORMS,
 	connectorChannelsFromPlatforms,
 	listConnectorCatalog,
+	preserveConnectorPassthroughArgs,
 	shouldIncludeConnectorField,
 } from "@cline/shared";
 import { withConnectorStore } from "@cline/shared/db";
@@ -293,21 +294,26 @@ function configureConnector(payload: unknown): ConnectorChannelsResponse {
 	const security = securityEnabled
 		? { enabled: true, values: securityValues }
 		: { enabled: false, values: {} };
-	const connectArgs = buildConnectorConnectArgs(
+	const rebuiltArgs = buildConnectorConnectArgs(
 		platform,
 		fieldValues,
 		security,
 	);
 
-	withConnectorStore((store) =>
+	withConnectorStore((store) => {
+		const connectArgs = preserveConnectorPassthroughArgs(
+			platform,
+			rebuiltArgs,
+			store.get(channel)?.connectArgs,
+		);
 		store.upsertConfig({
 			channel,
 			type: channel,
 			values: fieldValues,
 			security,
 			connectArgs,
-		}),
-	);
+		});
+	});
 	return connectorChannelsPayload();
 }
 

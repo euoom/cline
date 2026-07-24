@@ -10,6 +10,7 @@ const {
 	mockResolveProductionHubOwnerContext,
 	mockResolveSharedHubOwnerContext,
 	mockStartHubWebSocketServer,
+	mockReconnectPersistedConnectorsFromDaemon,
 } = vi.hoisted(() => ({
 	mockCreateLocalHubScheduleRuntimeHandlers: vi.fn(() => ({
 		startSession: vi.fn(),
@@ -36,6 +37,7 @@ const {
 	mockStartHubWebSocketServer: vi.fn(async () => ({
 		close: vi.fn(async () => undefined),
 	})),
+	mockReconnectPersistedConnectorsFromDaemon: vi.fn(async () => undefined),
 }));
 
 const {
@@ -86,6 +88,11 @@ vi.mock("./telemetry", () => ({
 	createHubDaemonTelemetry: mockCreateHubDaemonTelemetry,
 }));
 
+vi.mock("./connector-reconnect", () => ({
+	reconnectPersistedConnectorsFromDaemon:
+		mockReconnectPersistedConnectorsFromDaemon,
+}));
+
 const originalArgv = [...process.argv];
 const originalCwd = process.cwd();
 
@@ -105,9 +112,35 @@ describe("hub daemon entry", () => {
 		mockStartHubWebSocketServer.mockClear();
 		mockCreateHubDaemonTelemetry.mockClear();
 		mockDaemonTelemetryDispose.mockClear();
+		mockReconnectPersistedConnectorsFromDaemon.mockClear();
 		for (const dir of tempDirs.splice(0)) {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+
+	it("reconnects persisted connectors only after the daemon is ready", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cline-hub-entry-test-"));
+		tempDirs.push(cwd);
+		process.argv = ["node", "entry.js", "--cwd", cwd];
+		vi.spyOn(process, "on").mockImplementation(() => process);
+
+		let releaseServer!: () => void;
+		mockStartHubWebSocketServer.mockImplementationOnce(async () => {
+			await new Promise<void>((resolve) => {
+				releaseServer = resolve;
+			});
+			return { close: vi.fn(async () => undefined) };
+		});
+
+		const { hubDaemonReady } = await import("./entry");
+		await Promise.resolve();
+		expect(mockReconnectPersistedConnectorsFromDaemon).not.toHaveBeenCalled();
+
+		releaseServer();
+		await hubDaemonReady;
+		await vi.waitFor(() => {
+			expect(mockReconnectPersistedConnectorsFromDaemon).toHaveBeenCalledOnce();
+		});
 	});
 
 	it("starts the daemon with cron options for the daemon workspace root", async () => {
