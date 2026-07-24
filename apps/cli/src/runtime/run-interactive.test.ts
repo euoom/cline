@@ -128,6 +128,8 @@ describe("applyInteractiveModelChange", () => {
 
 describe("resumeInteractiveSession", () => {
 	it("starts the selected session directly without ensuring an empty session first", async () => {
+		const previousResumeFlag = process.env.CLINE_HOOK_AGENT_RESUME;
+		delete process.env.CLINE_HOOK_AGENT_RESUME;
 		const messages = [
 			{ id: "message-1", role: "user" as const, content: "hello" },
 		];
@@ -144,21 +146,30 @@ describe("resumeInteractiveSession", () => {
 			getAccumulatedUsage,
 		};
 
-		const result = await resumeInteractiveSession(
-			sessionRuntime,
-			"session-selected",
-		);
+		try {
+			const result = await resumeInteractiveSession(
+				sessionRuntime,
+				"session-selected",
+			);
 
-		expect(ensureReady).not.toHaveBeenCalled();
-		expect(resumeSession).toHaveBeenCalledOnce();
-		expect(resumeSession).toHaveBeenCalledWith("session-selected");
-		expect(getAccumulatedUsage).toHaveBeenCalledWith({
-			inputTokens: 0,
-			outputTokens: 0,
-		});
-		expect(result).toMatchObject({
-			messages,
-			totalCost: 0.42,
-		});
+			expect(ensureReady).not.toHaveBeenCalled();
+			expect(resumeSession).toHaveBeenCalledOnce();
+			expect(resumeSession).toHaveBeenCalledWith("session-selected");
+			expect(process.env.CLINE_HOOK_AGENT_RESUME).toBe("1");
+			expect(getAccumulatedUsage).toHaveBeenCalledWith({
+				inputTokens: 0,
+				outputTokens: 0,
+			});
+			expect(result).toMatchObject({
+				messages,
+				totalCost: 0.42,
+			});
+		} finally {
+			if (previousResumeFlag === undefined) {
+				delete process.env.CLINE_HOOK_AGENT_RESUME;
+			} else {
+				process.env.CLINE_HOOK_AGENT_RESUME = previousResumeFlag;
+			}
+		}
 	});
 });

@@ -147,6 +147,9 @@ export async function resumeInteractiveSession(
 	>,
 	sessionId: string,
 ) {
+	// Match CLI `--id` startup: hook dispatch keys off this env var to emit
+	// `agent_resume` instead of `agent_start` on the next beforeRun.
+	process.env.CLINE_HOOK_AGENT_RESUME = "1";
 	const messages = await sessionRuntime.resumeSession(sessionId);
 	const usage = await sessionRuntime.getAccumulatedUsage({
 		inputTokens: 0,
