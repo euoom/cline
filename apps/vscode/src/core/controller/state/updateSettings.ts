@@ -1,3 +1,4 @@
+import { setCompactionStrategyGlobally } from "@cline/core"
 import { Empty } from "@shared/proto/cline/common"
 import { PlanActMode, McpDisplayMode as ProtoMcpDisplayMode, UpdateSettingsRequest } from "@shared/proto/cline/state"
 import { convertProtoToApiProvider } from "@shared/proto-conversions/models/api-configuration-conversion"
@@ -123,10 +124,10 @@ export async function updateSettings(controller: Controller, request: UpdateSett
 		}
 
 		if (request.vscodeTerminalExecutionMode !== undefined && request.vscodeTerminalExecutionMode !== "") {
-			controller.stateManager.setGlobalState(
-				"vscodeTerminalExecutionMode",
-				request.vscodeTerminalExecutionMode === "backgroundExec" ? "backgroundExec" : "vscodeTerminal",
-			)
+			const previousMode = controller.stateManager.getGlobalStateKey("vscodeTerminalExecutionMode")
+			const nextMode = request.vscodeTerminalExecutionMode === "backgroundExec" ? "backgroundExec" : "vscodeTerminal"
+			controller.stateManager.setGlobalState("vscodeTerminalExecutionMode", nextMode)
+			controller.handleTerminalExecutionModeChanged(previousMode, nextMode)
 		}
 
 		// Update max consecutive mistakes
@@ -177,6 +178,14 @@ export async function updateSettings(controller: Controller, request: UpdateSett
 				)
 			}
 			controller.stateManager.setGlobalState("useAutoCondense", request.useAutoCondense)
+		}
+
+		if (request.compactionStrategy !== undefined) {
+			const strategy = request.compactionStrategy
+			if (strategy !== "basic" && strategy !== "agentic") {
+				throw new Error(`Invalid compaction strategy value: ${strategy}`)
+			}
+			setCompactionStrategyGlobally(strategy)
 		}
 
 		// Update custom prompt choice
@@ -230,7 +239,10 @@ export async function updateSettings(controller: Controller, request: UpdateSett
 			controller.stateManager.setGlobalState("defaultTerminalProfile", request.defaultTerminalProfile)
 			// Update the live terminal manager so new terminals use the new profile.
 			// Existing terminals are left open — they're keyed by effective shell
-			// and reused when compatible, or skipped when not.
+			// and reused when compatible, or skipped when not. No session rebuild
+			// is needed: the run_commands tool re-reads the profile each time a
+			// model request is built, so the description and execution both pick
+			// up the new shell at the next request boundary.
 			controller.terminalManager?.setDefaultTerminalProfile(request.defaultTerminalProfile)
 		}
 

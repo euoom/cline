@@ -4,6 +4,7 @@
 // This allows the SdkController to reuse the classic state-building logic
 // without inheriting the entire classic Controller implementation.
 
+import { readCompactionStrategyGlobally } from "@cline/core"
 import { getHooksEnabledSafe } from "@core/hooks/hooks-utils"
 import type { ExtensionState, Platform } from "@shared/ExtensionMessage"
 import { ClineEnv } from "@/config"
@@ -24,6 +25,7 @@ export async function getStateToPostToWebview(controller: {
 	mcpHub?: any
 	backgroundCommandRunning?: boolean
 	backgroundCommandTaskId?: string
+	foregroundCommandRunning?: boolean
 	workspaceManager?: any
 	checkpointRestoreInput?: ExtensionState["checkpointRestoreInput"]
 }): Promise<ExtensionState> {
@@ -40,6 +42,7 @@ export async function getStateToPostToWebview(controller: {
 	const mode = stateManager.getGlobalSettingsKey("mode")
 	const yoloModeToggled = stateManager.getGlobalSettingsKey("yoloModeToggled")
 	const useAutoCondense = stateManager.getGlobalSettingsKey("useAutoCondense")
+	const compactionStrategy = readCompactionStrategyGlobally()
 	const subagentsEnabled = stateManager.getGlobalSettingsKey("subagentsEnabled")
 	const userInfo = stateManager.getGlobalStateKey("userInfo")
 	const mcpMarketplaceEnabled = stateManager.getGlobalStateKey("mcpMarketplaceEnabled")
@@ -118,6 +121,7 @@ export async function getStateToPostToWebview(controller: {
 		mode,
 		yoloModeToggled,
 		useAutoCondense,
+		compactionStrategy,
 		subagentsEnabled,
 		userInfo,
 		mcpMarketplaceEnabled,
@@ -154,6 +158,7 @@ export async function getStateToPostToWebview(controller: {
 		favoritedModelIds,
 		backgroundCommandRunning: controller.backgroundCommandRunning ?? false,
 		backgroundCommandTaskId: controller.backgroundCommandTaskId,
+		foregroundCommandRunning: controller.foregroundCommandRunning ?? false,
 		workspaceRoots: controller.workspaceManager?.getRoots?.() ?? [],
 		primaryRootIndex: controller.workspaceManager?.getPrimaryIndex?.() ?? 0,
 		isMultiRootWorkspace: (controller.workspaceManager?.getRoots?.()?.length ?? 0) > 1,

@@ -12,11 +12,11 @@ import {
 	type AiSdkFormatterPart,
 	captureSdkError,
 	formatMessagesForAiSdk,
+	parseJsonStream,
 	sanitizeSurrogates,
 } from "@cline/shared";
-import { jsonSchema, streamText } from "ai";
+import { type CallSettings, jsonSchema, NoSuchToolError, streamText } from "ai";
 import { nanoid } from "nanoid";
-import { z } from "zod";
 import { extractErrorMessage } from "./format";
 import {
 	isAnthropicCompatibleModel,
@@ -52,6 +52,18 @@ interface GatewayNormalizedUsage {
 	totalCost?: number;
 }
 type ProviderModuleKind = AiSdkProviderOptionsTarget;
+
+export function buildAiSdkStreamConfig(
+	request: GatewayStreamRequest,
+	_context: GatewayProviderContext,
+): Partial<CallSettings> {
+	return {
+		...(request.maxTokens !== undefined
+			? { maxOutputTokens: request.maxTokens }
+			: {}),
+		temperature: request.temperature,
+	};
+}
 
 function buildCachedAiSdkMessages(
 	request: GatewayStreamRequest,
@@ -352,11 +364,15 @@ function toAiSdkMessages(
 			}
 		}
 
+		// A message left empty only because its reasoning was dropped is
+		// omitted entirely instead of forwarded as an empty turn.
+		const emptiedByDroppedReasoning = !includeReasoning && skippedReasoning;
 		if (content.length > 0) {
 			normalizedMessages.push({ role: message.role, content });
-		} else if (!includeReasoning && skippedReasoning) {
-			continue;
-		} else if (message.role === "user" || message.role === "assistant") {
+		} else if (
+			!emptiedByDroppedReasoning &&
+			(message.role === "user" || message.role === "assistant")
+		) {
 			normalizedMessages.push({ role: message.role, content: "" });
 		}
 	}
@@ -373,6 +389,11 @@ function toAiSdkTools(
 		return undefined;
 	}
 
+	// No validate callback on purpose: schema validation belongs to the tools
+	// themselves (core executors validate with lenient union schemas that
+	// accept common weak-model shapes like a bare string for a string[]
+	// property). Rejecting here would return an error to the model without
+	// the tool's own input handling ever seeing the call.
 	return Object.fromEntries(
 		request.tools.map((definition) => [
 			definition.name,
@@ -380,20 +401,52 @@ function toAiSdkTools(
 				description: definition.description,
 				inputSchema: jsonSchema(
 					normalizeAiSdkToolInputSchema(definition.inputSchema),
-					{
-						validate: async (value) => {
-							const result = await z
-								.fromJSONSchema(definition.inputSchema)
-								.safeParseAsync(value);
-							return result.success
-								? { success: true, value: result.data }
-								: { success: false, error: result.error };
-						},
-					},
 				) as never,
 			} as unknown,
 		]),
 	);
+}
+
+interface RepairableToolCall {
+	toolCallId: string;
+	toolName: string;
+	input: string;
+}
+
+/**
+ * Last-chance repair for tool calls whose arguments are not valid JSON
+ * (truncated payloads, single quotes, unescaped newlines — common with
+ * weaker models). Runs the raw argument text through the shared jsonrepair
+ * strategies; unknown tool names and already-valid JSON are not repairable
+ * here, and returning null preserves the AI SDK's original error behavior.
+ */
+export async function repairMalformedToolCall<T extends RepairableToolCall>({
+	toolCall,
+	error,
+}: {
+	toolCall: T;
+	error: unknown;
+}): Promise<T | null> {
+	if (NoSuchToolError.isInstance(error)) {
+		return null;
+	}
+	if (typeof toolCall.input !== "string" || toolCall.input.trim() === "") {
+		return null;
+	}
+	try {
+		JSON.parse(toolCall.input);
+		// Valid JSON means the failure was a schema mismatch, not a parse
+		// error. That is left to the tool executor's own lenient union
+		// schemas; there is nothing to repair here.
+		return null;
+	} catch {
+		// Not valid JSON — attempt repair below.
+	}
+	const repaired = parseJsonStream(toolCall.input);
+	if (repaired === toolCall.input || typeof repaired === "string") {
+		return null;
+	}
+	return { ...toolCall, input: JSON.stringify(repaired) };
 }
 
 function normalizeAiSdkToolInputSchema(
@@ -1088,6 +1141,10 @@ async function createProviderModule(
 			const { createDifyProviderModule } = await import("./vendors/community");
 			return createDifyProviderModule(config);
 		}
+		case "ollama": {
+			const { createOllamaProviderModule } = await import("./vendors/ollama");
+			return createOllamaProviderModule(config, context);
+		}
 		case "sapaicore": {
 			const { createSapAiCoreProviderModule } = await import(
 				"./vendors/community"
@@ -1138,6 +1195,9 @@ function createAiSdkProvider(kind: ProviderModuleKind): GatewayProviderFactory {
 					context,
 					kind,
 				) as never;
+				const requestConfig = provider.buildStreamConfig
+					? provider.buildStreamConfig(request, context)
+					: buildAiSdkStreamConfig(request, context);
 				recordProviderRequestCapture({
 					stage: "ai_sdk_prompt",
 					request,
@@ -1146,8 +1206,7 @@ function createAiSdkProvider(kind: ProviderModuleKind): GatewayProviderFactory {
 						...(useSystemOption ? { system: systemPrompt } : {}),
 						tools,
 						providerOptions,
-						maxOutputTokens: request.maxTokens,
-						temperature: request.temperature,
+						...requestConfig,
 					},
 				});
 				stream = streamText({
@@ -1155,15 +1214,13 @@ function createAiSdkProvider(kind: ProviderModuleKind): GatewayProviderFactory {
 					messages: messages as never,
 					...(useSystemOption ? { system: systemPrompt } : {}),
 					tools: tools as never,
-					temperature: request.temperature,
-					...(request.maxTokens !== undefined
-						? { maxOutputTokens: request.maxTokens }
-						: {}),
 					abortSignal: request.signal,
+					experimental_repairToolCall: repairMalformedToolCall as never,
 					experimental_telemetry: {
 						isEnabled: langfuse,
 					},
 					providerOptions,
+					...requestConfig,
 					onError: ({ error: streamError }) => {
 						const msg = extractErrorMessage(streamError);
 						capturedError.current = msg;
@@ -1258,4 +1315,5 @@ export const createClaudeCodeProvider = createAiSdkProvider("claude-code");
 export const createOpenAICodexProvider = createAiSdkProvider("openai-codex");
 export const createOpenCodeProvider = createAiSdkProvider("opencode");
 export const createDifyProvider = createAiSdkProvider("dify");
+export const createOllamaProvider = createAiSdkProvider("ollama");
 export const createSapAiCoreProvider = createAiSdkProvider("sapaicore");
