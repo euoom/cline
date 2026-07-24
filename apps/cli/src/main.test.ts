@@ -286,6 +286,10 @@ describe("runCli lightweight command dispatch", () => {
 			value: true,
 			configurable: true,
 		});
+		Object.defineProperty(process.stdout, "isTTY", {
+			value: true,
+			configurable: true,
+		});
 	});
 
 	afterEach(() => {
@@ -520,10 +524,6 @@ describe("runCli lightweight command dispatch", () => {
 	});
 
 	it("creates a worktree for default interactive mode", async () => {
-		Object.defineProperty(process.stdout, "isTTY", {
-			value: true,
-			configurable: true,
-		});
 		process.argv = ["bun", "src/index.ts", "--worktree"];
 
 		const { runCli } = await import("./main");
@@ -626,7 +626,7 @@ describe("runCli lightweight command dispatch", () => {
 			expect.anything(),
 			undefined,
 			expect.objectContaining({
-				initialView: undefined,
+				startupTarget: undefined,
 			}),
 		);
 	});
@@ -637,10 +637,6 @@ describe("runCli lightweight command dispatch", () => {
 			title: "Try ClinePass",
 		};
 		migrationNoticeMocks.getClineCliMigrationNotice.mockReturnValue(notice);
-		Object.defineProperty(process.stdout, "isTTY", {
-			value: true,
-			configurable: true,
-		});
 		process.argv = ["bun", "src/index.ts"];
 
 		const { runCli } = await import("./main");
@@ -669,10 +665,6 @@ describe("runCli lightweight command dispatch", () => {
 		providerSettingsMocks.getLastUsedProviderSettings.mockReturnValue({
 			provider: "cline-pass",
 			model: "cline-pass/test-model",
-		});
-		Object.defineProperty(process.stdout, "isTTY", {
-			value: true,
-			configurable: true,
 		});
 		process.argv = ["bun", "src/index.ts"];
 
@@ -778,7 +770,7 @@ describe("runCli lightweight command dispatch", () => {
 			undefined,
 			expect.objectContaining({
 				initialPrompt: "sup",
-				initialView: undefined,
+				startupTarget: undefined,
 			}),
 		);
 	});
@@ -852,23 +844,25 @@ describe("runCli lightweight command dispatch", () => {
 			expect.anything(),
 			"sess_123",
 			expect.objectContaining({
-				initialView: "chat",
+				startupTarget: "chat",
 			}),
 		);
 	});
 
 	it("opens history inside the interactive TUI for the history picker", async () => {
-		Object.defineProperty(process.stdout, "isTTY", {
-			value: true,
-			configurable: true,
+		migrationNoticeMocks.getClineCliMigrationNotice.mockReturnValue({
+			id: "cline-cli-cline-pass-intro",
+			title: "Try ClinePass",
 		});
-
 		process.argv = ["bun", "src/index.ts", "history"];
 
 		const { runCli } = await import("./main");
 
 		await expect(runCli()).resolves.toBeUndefined();
 		expect(historyMocks.runHistoryList).not.toHaveBeenCalled();
+		expect(
+			migrationNoticeMocks.getClineCliMigrationNotice,
+		).not.toHaveBeenCalled();
 		expect(runtimeMocks.runInteractive).toHaveBeenCalledTimes(1);
 		expect(runtimeMocks.runInteractive).toHaveBeenCalledWith(
 			expect.any(Object),
@@ -876,7 +870,7 @@ describe("runCli lightweight command dispatch", () => {
 			undefined,
 			expect.objectContaining({
 				initialPrompt: undefined,
-				initialView: "history",
+				startupTarget: "history",
 			}),
 		);
 	});
