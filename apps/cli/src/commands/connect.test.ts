@@ -4,7 +4,11 @@ import {
 	CONNECT_ALREADY_RUNNING_EXIT_CODE,
 } from "../connectors/common";
 import type { ConnectIo } from "../connectors/types";
-import { runConnectAdapter, stopAllConnectors } from "./connect";
+import {
+	runConnectAdapter,
+	runStopAllConnectors,
+	stopAllConnectors,
+} from "./connect";
 
 const mocks = vi.hoisted(() => ({
 	disableConnectorAutostart: vi.fn(),
@@ -138,7 +142,7 @@ describe("runConnectAdapter", () => {
 		expect(mocks.disableConnectorAutostart).not.toHaveBeenCalled();
 	});
 
-	it("disables autostart when stop implementations execute", async () => {
+	it("does not clear autostart during shared stop cleanup", async () => {
 		const stopAll = vi.fn().mockResolvedValue({
 			stoppedProcesses: 1,
 			stoppedSessions: 2,
@@ -161,6 +165,31 @@ describe("runConnectAdapter", () => {
 		});
 
 		expect(stopAll).toHaveBeenCalledWith(io);
+		expect(mocks.disableConnectorAutostart).not.toHaveBeenCalled();
+	});
+
+	it("disables autostart for explicit connect --stop all", async () => {
+		const stopAll = vi.fn().mockResolvedValue({
+			stoppedProcesses: 1,
+			stoppedSessions: 2,
+		});
+		mocks.listConnectors.mockReturnValue([
+			{ name: "telegram", description: "Telegram" },
+		]);
+		mocks.getConnector.mockResolvedValue({
+			name: "telegram",
+			description: "Telegram",
+			run: mocks.run,
+			showHelp: vi.fn(),
+			stopAll,
+		});
+
+		await expect(runStopAllConnectors(io)).resolves.toBe(0);
+
+		expect(stopAll).toHaveBeenCalledWith(io);
 		expect(mocks.disableConnectorAutostart).toHaveBeenCalledWith();
+		expect(io.writeln).toHaveBeenCalledWith(
+			"[connect] stopped processes=1 sessions=2",
+		);
 	});
 });

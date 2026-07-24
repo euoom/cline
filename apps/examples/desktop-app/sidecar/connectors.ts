@@ -3,12 +3,12 @@ import { existsSync } from "node:fs";
 import { basename, join, normalize } from "node:path";
 import process from "node:process";
 import { listActiveConnectors } from "@cline/core";
-import { withResolvedClineBuildEnv } from "@cline/shared";
-import { listConnectorCatalog } from "../../../cli/src/connectors/catalog";
 import {
-	PLATFORMS,
-	shouldIncludeField,
-} from "../../../cli/src/wizards/connect/platforms";
+	buildConnectorConnectArgs,
+	listConnectorCatalog,
+	withResolvedClineBuildEnv,
+} from "@cline/shared";
+import { PLATFORMS } from "../../../cli/src/wizards/connect/platforms";
 import type { JsonRecord } from "./types";
 
 type ConnectorField = {
@@ -229,32 +229,21 @@ function buildConnectorStartArgs(args?: Record<string, unknown>): string[] {
 			fieldValues[field.flag] = field.initialValue;
 		}
 	}
-	const cliArgs = [channel];
-	for (const field of platform.fields) {
-		if (!shouldIncludeField(field, fieldValues)) {
-			continue;
+	const securityInput = asRecord(args?.security);
+	const rawSecurityValues = asRecord(securityInput?.values) ?? {};
+	const securityValues: Record<string, string> = {};
+	for (const [key, value] of Object.entries(rawSecurityValues)) {
+		if (typeof value === "string") {
+			securityValues[key] = value.trim();
 		}
-		const value = fieldValues[field.flag];
-		if (!value) {
-			if (field.required) throw new Error(`${field.label} is required`);
-			continue;
-		}
-		cliArgs.push(field.flag, value);
 	}
-	const security = asRecord(args?.security);
-	if (security?.enabled === true && platform.security) {
-		const securityValues = asRecord(security.values) ?? {};
-		const hookValues: Record<string, string> = {};
-		for (const field of platform.security.fields) {
-			const value = asString(securityValues[field.key]);
-			if (!value) throw new Error(field.requiredMessage);
-			const validationError = field.validate?.(value);
-			if (validationError) throw new Error(validationError);
-			hookValues[field.key] = value;
-		}
-		cliArgs.push(...platform.security.buildArgs(hookValues));
-	}
-	return cliArgs;
+	return [
+		channel,
+		...buildConnectorConnectArgs(platform, fieldValues, {
+			enabled: securityInput?.enabled === true,
+			values: securityValues,
+		}),
+	];
 }
 
 export async function startConnectorChannel(

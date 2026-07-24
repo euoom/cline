@@ -635,9 +635,12 @@ class TelegramConnector extends ConnectorBase<
 			...inputOptions,
 			botUsername: resolvedBotUsername,
 		};
-		const backgroundArgs = inputOptions.botUsername
-			? rawArgs
-			: [...rawArgs, "--bot-username", resolvedBotUsername];
+		// Persist the resolved username on the caller's args so autostart can
+		// reconnect without another getMe round-trip.
+		if (!inputOptions.botUsername) {
+			rawArgs.push("--bot-username", resolvedBotUsername);
+		}
+		const backgroundArgs = rawArgs;
 		const statePath = this.resolveConnectorStatePath(options.botUsername);
 		const bindingsPath = this.resolveBindingsPath(options.botUsername);
 		const staleState = this.removeStaleState(

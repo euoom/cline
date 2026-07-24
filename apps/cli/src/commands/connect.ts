@@ -31,9 +31,6 @@ export async function stopAllConnectors(
 		stoppedProcesses += result.stoppedProcesses;
 		stoppedSessions += result.stoppedSessions;
 	}
-	if (executed > 0) {
-		disableConnectorAutostart();
-	}
 	return { stoppedProcesses, stoppedSessions, executed };
 }
 
@@ -44,6 +41,9 @@ export async function runStopAllConnectors(io: ConnectIo): Promise<number> {
 		io.writeln("[connect] no adapters support stop yet");
 		return 0;
 	}
+	// Explicit `connect --stop` only — doctor --fix reuses stopAllConnectors
+	// for process cleanup and must not clear reconnect preferences.
+	disableConnectorAutostart();
 	io.writeln(
 		`[connect] stopped processes=${stoppedProcesses} sessions=${stoppedSessions}`,
 	);

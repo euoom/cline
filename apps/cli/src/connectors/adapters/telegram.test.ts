@@ -2,9 +2,18 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ConnectTelegramOptions } from "@cline/shared";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CONNECT_ALREADY_RUNNING_EXIT_CODE } from "../common";
 import { __test__, telegramConnector } from "./telegram";
+
+const commonMocks = vi.hoisted(() => ({
+	spawnDetachedConnector: vi.fn(),
+}));
+
+vi.mock("../common", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../common")>()),
+	spawnDetachedConnector: commonMocks.spawnDetachedConnector,
+}));
 
 const parseTelegramArgs = (rawArgs: string[]): ConnectTelegramOptions =>
 	(
@@ -22,6 +31,11 @@ function useTempClineDataDir(): string {
 	process.env.CLINE_DATA_DIR = dataDir;
 	return dataDir;
 }
+
+beforeEach(() => {
+	vi.clearAllMocks();
+	commonMocks.spawnDetachedConnector.mockReturnValue(42);
+});
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -187,6 +201,46 @@ describe("telegramConnector", () => {
 		expect(output).toEqual([
 			`[telegram] connector already running pid=${process.pid} rpc=127.0.0.1:54321`,
 		]);
+	});
+
+	it("appends resolved --bot-username to args for autostart persistence", async () => {
+		useTempClineDataDir();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				async () =>
+					new Response(
+						JSON.stringify({
+							ok: true,
+							result: { username: "resolved_bot" },
+						}),
+					),
+			),
+		);
+		const args = ["--bot-token", "123:test", "--cwd", "/tmp/work"];
+		const output: string[] = [];
+
+		await expect(
+			telegramConnector.run(args, {
+				writeln: (text = "") => output.push(text),
+				writeErr: vi.fn(),
+			}),
+		).resolves.toBe(0);
+
+		expect(args).toEqual([
+			"--bot-token",
+			"123:test",
+			"--cwd",
+			"/tmp/work",
+			"--bot-username",
+			"resolved_bot",
+		]);
+		expect(commonMocks.spawnDetachedConnector).toHaveBeenCalledWith(
+			["connect", "telegram"],
+			args,
+			"CLINE_TELEGRAM_CONNECT_CHILD",
+		);
+		expect(output[0]).toContain("bot=@resolved_bot");
 	});
 });
 
