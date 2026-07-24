@@ -27,6 +27,7 @@ describe("runConnectAdapter", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		vi.unstubAllEnvs();
 		mocks.run.mockResolvedValue(0);
 		mocks.getConnector.mockResolvedValue({
 			name: "telegram",
@@ -58,6 +59,19 @@ describe("runConnectAdapter", () => {
 
 		expect(mocks.persistConnectorConnection).not.toHaveBeenCalled();
 		expect(mocks.disableConnectorAutostart).toHaveBeenCalledWith("telegram");
+	});
+
+	it("does not clear autostart when a detached connector child exits cleanly", async () => {
+		vi.stubEnv("CLINE_TELEGRAM_CONNECT_CHILD", "1");
+
+		await expect(
+			runConnectAdapter("telegram", ["-k", "token", "-i"], io),
+		).resolves.toBe(0);
+
+		expect(mocks.persistConnectorConnection).not.toHaveBeenCalled();
+		expect(mocks.disableConnectorAutostart).not.toHaveBeenCalled();
+
+		vi.unstubAllEnvs();
 	});
 
 	it("does not change persistence after a failed foreground run", async () => {

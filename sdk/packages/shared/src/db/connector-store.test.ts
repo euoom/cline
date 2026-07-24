@@ -79,8 +79,20 @@ describe("SqliteConnectorStore", () => {
 			});
 			const record = store.get("telegram");
 			expect(record?.values).toEqual({ "-k": "456:rotated" });
-			expect(record?.connectArgs).toEqual(["-k", "123:token"]);
+			// Launch args must track rotated credentials for autostart.
+			expect(record?.connectArgs).toEqual(["-k", "456:rotated"]);
 			expect(record?.enabled).toBe(false);
+		});
+	});
+
+	it("does not invent connect args for configure-only connectors", () => {
+		useTempDataDir();
+		withStore((store) => {
+			store.upsertConfig({
+				channel: "telegram",
+				values: { "-k": "123:token" },
+			});
+			expect(store.get("telegram")?.connectArgs).toBeUndefined();
 		});
 	});
 

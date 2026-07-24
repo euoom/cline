@@ -7,6 +7,16 @@ import type { ConnectIo, ConnectStopResult } from "../connectors/types";
 
 const HELP_FLAGS = new Set(["-h", "--help"]);
 const INTERACTIVE_FLAGS = new Set(["-i", "--interactive"]);
+const DETACHED_CHILD_ENV_PATTERN = /^CLINE_[A-Z0-9]+_CONNECT_CHILD$/;
+
+/** True when this process is a detached connector child (spawned with `-i`). */
+function isDetachedConnectorChildProcess(
+	env: NodeJS.ProcessEnv = process.env,
+): boolean {
+	return Object.entries(env).some(
+		([key, value]) => DETACHED_CHILD_ENV_PATTERN.test(key) && value === "1",
+	);
+}
 
 export async function stopAllConnectors(
 	io: ConnectIo,
@@ -82,9 +92,17 @@ export async function runConnectAdapter(
 	const isInteractiveInvocation = passthroughArgs.some((arg) =>
 		INTERACTIVE_FLAGS.has(arg),
 	);
-	if (exitCode === 0 && !isHelpInvocation && isInteractiveInvocation) {
+	// Detached launches append `-i` so the child stays foreground in its own
+	// process. Only a user-started interactive session should clear autostart;
+	// infrastructure-driven exits of background children must not.
+	if (
+		exitCode === 0 &&
+		!isHelpInvocation &&
+		isInteractiveInvocation &&
+		!isDetachedConnectorChildProcess()
+	) {
 		disableConnectorAutostart(connector.name);
-	} else if (exitCode === 0 && !isHelpInvocation) {
+	} else if (exitCode === 0 && !isHelpInvocation && !isInteractiveInvocation) {
 		persistConnectorConnection(connector.name, passthroughArgs);
 	}
 	return exitCode;

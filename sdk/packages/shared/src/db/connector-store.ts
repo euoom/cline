@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, renameSync } from "node:fs";
+import { buildConnectorConnectArgs } from "../connectors/platforms";
 import {
 	resolveConnectorSettingsPath,
 	resolveConnectorsDbPath,
@@ -147,7 +148,10 @@ export class SqliteConnectorStore {
 
 	/**
 	 * Create or update the stored configuration for a channel while preserving
-	 * connection state (connect args, enabled flag, last-connected timestamp).
+	 * connection state (enabled flag, last-connected timestamp). When the
+	 * channel already has stored launch args from a prior successful start,
+	 * rebuild those args from the new values so autostart does not keep using
+	 * stale credentials after a configure/token rotation.
 	 */
 	upsertConfig(entry: {
 		channel: string;
@@ -159,6 +163,10 @@ export class SqliteConnectorStore {
 	}): void {
 		const now = nowIso();
 		const existing = this.get(entry.channel);
+		const rebuiltConnectArgs = existing?.connectArgs?.length
+			? buildConnectorConnectArgs(entry.channel, entry.values, entry.security)
+			: undefined;
+		const connectArgs = rebuiltConnectArgs ?? existing?.connectArgs;
 		this.getRawDb()
 			.prepare(
 				`INSERT INTO connectors (
@@ -170,6 +178,7 @@ export class SqliteConnectorStore {
 					values_json = excluded.values_json,
 					security_enabled = excluded.security_enabled,
 					security_values_json = excluded.security_values_json,
+					connect_args_json = excluded.connect_args_json,
 					updated_at = excluded.updated_at`,
 			)
 			.run(
@@ -178,7 +187,7 @@ export class SqliteConnectorStore {
 				JSON.stringify(entry.values),
 				toBoolInt(entry.security?.enabled === true),
 				JSON.stringify(entry.security?.values ?? {}),
-				existing?.connectArgs ? JSON.stringify(existing.connectArgs) : null,
+				connectArgs ? JSON.stringify(connectArgs) : null,
 				toBoolInt(existing?.enabled ?? true),
 				entry.configuredAt ?? existing?.configuredAt ?? now,
 				entry.updatedAt ?? now,

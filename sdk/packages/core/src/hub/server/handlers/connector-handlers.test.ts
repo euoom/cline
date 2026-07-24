@@ -135,6 +135,19 @@ describe("connector hub handlers", () => {
 		expect(readPersistedConnector("slack")).toBeUndefined();
 	});
 
+	it("does not list CLI-only autostart rows as hub-configured connectors", () => {
+		useTempDataDir();
+		withConnectorStore((store) => {
+			store.recordConnected("telegram", ["-k", "123456:cli-token"]);
+		});
+
+		expect(__test__.connectorChannelsPayload().configured).toEqual([]);
+		expect(readPersistedConnector("telegram")?.connectArgs).toEqual([
+			"-k",
+			"123456:cli-token",
+		]);
+	});
+
 	it("validates only included conditional connector fields", () => {
 		useTempDataDir();
 

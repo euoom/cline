@@ -134,6 +134,66 @@ export function shouldIncludeConnectorField(
 	return true;
 }
 
+/**
+ * Build non-interactive `cline connect <channel>` argv (without the channel
+ * name) from hub-configured field values so autostart tracks config edits such
+ * as token rotation.
+ */
+export function buildConnectorConnectArgs(
+	channel: string,
+	values: Record<string, string>,
+	security?: { enabled: boolean; values: Record<string, string> },
+): string[] | undefined {
+	const platform = CONNECTOR_PLATFORMS.find((entry) => entry.id === channel);
+	if (!platform) {
+		return undefined;
+	}
+
+	const fieldValues: Record<string, string> = {};
+	for (const field of platform.fields) {
+		const rawValue = values[field.flag];
+		// Preserve empty strings: Slack socket mode keys off `--base-url=""`.
+		if (typeof rawValue === "string") {
+			fieldValues[field.flag] = rawValue.trim();
+		} else if (field.initialValue) {
+			fieldValues[field.flag] = field.initialValue;
+		}
+	}
+
+	const cliArgs: string[] = [];
+	for (const field of platform.fields) {
+		if (!shouldIncludeConnectorField(field, fieldValues)) {
+			continue;
+		}
+		const value = fieldValues[field.flag];
+		if (!value) {
+			if (field.required) {
+				return undefined;
+			}
+			continue;
+		}
+		cliArgs.push(field.flag, value);
+	}
+
+	if (security?.enabled === true && platform.security) {
+		const hookValues: Record<string, string> = {};
+		for (const field of platform.security.fields) {
+			const value = security.values[field.key]?.trim();
+			if (!value) {
+				return undefined;
+			}
+			const validationError = field.validate?.(value);
+			if (validationError) {
+				return undefined;
+			}
+			hookValues[field.key] = value;
+		}
+		cliArgs.push(...platform.security.buildArgs(hookValues));
+	}
+
+	return cliArgs.length > 0 ? cliArgs : undefined;
+}
+
 export function connectorChannelsFromPlatforms(
 	platforms: ConnectorPlatformDef[] = CONNECTOR_PLATFORMS,
 ): ConnectorChannel[] {

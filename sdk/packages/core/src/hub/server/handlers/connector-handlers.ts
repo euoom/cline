@@ -206,7 +206,10 @@ function listActiveConnectors(): ActiveConnectorRecord[] {
 }
 
 function listConfiguredConnectors(): ConfiguredConnectorRecord[] {
+	// CLI `recordConnected` rows persist autostart args with empty hub form
+	// values. Only surface channels that were actually configured in the hub.
 	return withConnectorStore((store) => store.list())
+		.filter((entry) => Object.keys(entry.values).length > 0)
 		.map((entry) => ({
 			id: entry.channel,
 			type: entry.type,

@@ -91,6 +91,27 @@ describe("connector autostart", () => {
 		expect(attempts).toEqual([]);
 	});
 
+	it("waits for a connector to become active before releasing the reconnect lock", async () => {
+		useTempDataDir();
+		persistConnectorConnection("telegram", ["-k", "123:token"]);
+
+		let active = false;
+		const start = vi.fn().mockImplementation(async () => {
+			setTimeout(() => {
+				active = true;
+			}, 50);
+			return true;
+		});
+		const attempts = await reconnectPersistedConnectors({
+			start,
+			isActive: () => active,
+		});
+
+		expect(start).toHaveBeenCalledOnce();
+		expect(active).toBe(true);
+		expect(attempts).toEqual([{ channel: "telegram", ok: true }]);
+	});
+
 	it("reports failed reconnect attempts", async () => {
 		useTempDataDir();
 		persistConnectorConnection("telegram", ["-k", "123:token"]);

@@ -1,6 +1,21 @@
+import {
+	closeSync,
+	existsSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
 import { withConnectorStore } from "@cline/shared/db";
+import { resolveConnectorDataDir } from "@cline/shared/storage";
 
 const INTERACTIVE_FLAGS = new Set(["-i", "--interactive"]);
+const RECONNECT_LOCK_RETRY_MS = 100;
+const RECONNECT_LOCK_TIMEOUT_MS = 30_000;
+const RECONNECT_ACTIVE_WAIT_MS = 5_000;
+const RECONNECT_ACTIVE_POLL_MS = 100;
 
 function stripInteractiveFlags(args: string[]): string[] {
 	return args.filter((arg) => !INTERACTIVE_FLAGS.has(arg));
@@ -52,6 +67,90 @@ export interface ReconnectPersistedConnectorsOptions {
 	log?: (message: string) => void;
 }
 
+function isPidAlive(pid: number): boolean {
+	if (!Number.isInteger(pid) || pid <= 0) {
+		return false;
+	}
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function readReconnectLockPid(lockPath: string): number | undefined {
+	try {
+		const raw = readFileSync(lockPath, "utf8").trim().split("\n")[0];
+		const pid = Number.parseInt(raw ?? "", 10);
+		return Number.isInteger(pid) ? pid : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Serialize reconnect across hosts (CLI daemon + hub dashboard) so both do not
+ * spawn the same channel while its state file is still being written.
+ */
+async function acquireReconnectLock(): Promise<() => void> {
+	const lockPath = join(resolveConnectorDataDir(), "reconnect.lock");
+	mkdirSync(resolveConnectorDataDir(), { recursive: true });
+	const deadline = Date.now() + RECONNECT_LOCK_TIMEOUT_MS;
+	while (Date.now() < deadline) {
+		try {
+			const fd = openSync(lockPath, "wx");
+			try {
+				writeFileSync(fd, `${process.pid}\n${Date.now()}\n`);
+			} finally {
+				closeSync(fd);
+			}
+			return () => {
+				try {
+					unlinkSync(lockPath);
+				} catch {
+					// Best-effort unlock.
+				}
+			};
+		} catch {
+			if (existsSync(lockPath)) {
+				const ownerPid = readReconnectLockPid(lockPath);
+				if (ownerPid !== undefined && !isPidAlive(ownerPid)) {
+					try {
+						unlinkSync(lockPath);
+						continue;
+					} catch {
+						// Another process may have claimed the lock.
+					}
+				}
+			}
+			await new Promise((resolve) =>
+				setTimeout(resolve, RECONNECT_LOCK_RETRY_MS),
+			);
+		}
+	}
+	// Prefer attempting reconnect over silently skipping after a lock timeout.
+	return () => {};
+}
+
+async function waitForActiveConnector(
+	isActive: ((channel: string) => boolean) | undefined,
+	channel: string,
+): Promise<void> {
+	if (!isActive) {
+		return;
+	}
+	const deadline = Date.now() + RECONNECT_ACTIVE_WAIT_MS;
+	while (Date.now() < deadline) {
+		if (isActive(channel)) {
+			return;
+		}
+		await new Promise((resolve) =>
+			setTimeout(resolve, RECONNECT_ACTIVE_POLL_MS),
+		);
+	}
+}
+
 /**
  * Reconnect every connector that has stored connection arguments, is enabled,
  * and is not already active in the calling host.
@@ -77,23 +176,30 @@ export async function reconnectPersistedConnectors(
 		return [];
 	}
 
+	const releaseLock = await acquireReconnectLock();
 	const attempts: ReconnectAttempt[] = [];
-	for (const { channel, args } of candidates) {
-		if (options.isActive?.(channel)) {
-			continue;
-		}
-		log(`[connect] reconnecting ${channel} connector`);
-		try {
-			const ok = await options.start(channel, args);
-			attempts.push({ channel, ok });
-			if (!ok) {
-				log(`[connect] failed to reconnect ${channel} connector`);
+	try {
+		for (const { channel, args } of candidates) {
+			if (options.isActive?.(channel)) {
+				continue;
 			}
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			attempts.push({ channel, ok: false, error: message });
-			log(`[connect] failed to reconnect ${channel} connector: ${message}`);
+			log(`[connect] reconnecting ${channel} connector`);
+			try {
+				const ok = await options.start(channel, args);
+				attempts.push({ channel, ok });
+				if (!ok) {
+					log(`[connect] failed to reconnect ${channel} connector`);
+					continue;
+				}
+				await waitForActiveConnector(options.isActive, channel);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				attempts.push({ channel, ok: false, error: message });
+				log(`[connect] failed to reconnect ${channel} connector: ${message}`);
+			}
 		}
+	} finally {
+		releaseLock();
 	}
 	return attempts;
 }

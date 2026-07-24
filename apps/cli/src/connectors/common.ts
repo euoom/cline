@@ -10,7 +10,10 @@ import {
 import { join } from "node:path";
 import type { HubSessionClient, HubSessionRow } from "@cline/core";
 import { ensureParentDir, resolveClineDataDir } from "@cline/core";
-import { withResolvedClineBuildEnv } from "@cline/shared";
+import {
+	CLINE_RUN_AS_HUB_DAEMON_ENV,
+	withResolvedClineBuildEnv,
+} from "@cline/shared";
 import { createCliLoggerAdapter } from "../logging/adapter";
 import { logSpawnedProcess } from "../logging/process";
 import { resolveCliLaunchSpec } from "../utils/internal-launch";
@@ -183,6 +186,14 @@ export function spawnDetachedConnector(
 	}
 	const detachedLogFd = tryOpenDetachedLogFd(options?.logPath);
 	try {
+		// Connector children must not inherit the hub-daemon entry flag; otherwise
+		// a reconnect spawned from the CLI-hosted daemon starts another daemon
+		// instead of the connect adapter.
+		const childEnv = {
+			...withResolvedClineBuildEnv(process.env),
+			[childEnvKey]: "1",
+		};
+		delete childEnv[CLINE_RUN_AS_HUB_DAEMON_ENV];
 		const child = spawn(command.launcher, command.childArgs, {
 			cwd: process.cwd(),
 			detached: true,
@@ -190,10 +201,7 @@ export function spawnDetachedConnector(
 				detachedLogFd === undefined
 					? "ignore"
 					: ["ignore", detachedLogFd, detachedLogFd],
-			env: {
-				...withResolvedClineBuildEnv(process.env),
-				[childEnvKey]: "1",
-			},
+			env: childEnv,
 			// Prevent a console window from appearing on Windows; detached
 			// processes otherwise allocate a new visible console.
 			windowsHide: true,
