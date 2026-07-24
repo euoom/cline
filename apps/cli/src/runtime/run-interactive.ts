@@ -770,7 +770,8 @@ export async function runInteractive(
 			await sessionRuntime.restartWithCurrentMessages();
 		},
 		onResumeSession: async (sessionId: string) => {
-			await sessionRuntime.ensureReady();
+			// Skip ensureReady(): with no active session it would start a fresh
+			// empty session before resume replaces it (e.g. `cline history`).
 			const messages = await sessionRuntime.resumeSession(sessionId);
 			const usage = await sessionRuntime.getAccumulatedUsage({
 				inputTokens: 0,
