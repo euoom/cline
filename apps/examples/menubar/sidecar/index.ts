@@ -1,5 +1,8 @@
+import { existsSync } from "node:fs";
+import { dirname, join, normalize, basename as pathBasename } from "node:path";
 import process from "node:process";
 import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 import {
 	ensureDetachedHubServer,
 	type HubServerDiscoveryRecord,
@@ -10,7 +13,39 @@ import {
 	stopLocalHubServerGracefully,
 	toHubStatusUrl,
 } from "@cline/core";
-import type { HubUINotifyPayload, SessionRecord } from "@cline/shared";
+import {
+	type HubUINotifyPayload,
+	type SessionRecord,
+	setConnectorCliLaunchSpec,
+} from "@cline/shared";
+
+const cliIndexPath = normalize(
+	join(dirname(fileURLToPath(import.meta.url)), "../../../cli/src/index.ts"),
+);
+
+function configureConnectorCliLaunch(cwd: string): void {
+	const execPath = process.execPath;
+	const runtimeName = pathBasename(execPath).toLowerCase();
+	const isBunRuntime = runtimeName.includes("bun");
+	const isNodeRuntime = runtimeName === "node" || runtimeName === "node.exe";
+	const useBunSourceEntrypoint =
+		(isBunRuntime || isNodeRuntime) && existsSync(cliIndexPath);
+	// The menubar sidecar is not the CLI binary, so fall back to `cline` on PATH
+	// when the monorepo source entrypoint is unavailable.
+	const launcher = useBunSourceEntrypoint
+		? isBunRuntime
+			? execPath
+			: "bun"
+		: "cline";
+	const connectArgsPrefix = useBunSourceEntrypoint
+		? ["--conditions=development", cliIndexPath, "connect"]
+		: ["connect"];
+	setConnectorCliLaunchSpec({
+		launcher,
+		connectArgsPrefix,
+		cwd,
+	});
+}
 
 interface TrackedClient {
 	clientId: string;
@@ -421,6 +456,7 @@ async function main(): Promise<void> {
 	let hubUrl: string;
 	let hubAuthToken: string;
 	try {
+		configureConnectorCliLaunch(workspaceRoot);
 		const hub = await ensureDetachedHubServer(workspaceRoot);
 		hubUrl = hub.url;
 		hubAuthToken = hub.authToken;

@@ -7,7 +7,9 @@ import type { ConnectIo, ConnectRunContext } from "../connectors/types";
 import {
 	runConnectAdapter,
 	runStopAllConnectors,
+	runStopConnector,
 	stopAllConnectors,
+	withResolvedCwdPersistenceArgs,
 } from "./connect";
 
 const mocks = vi.hoisted(() => ({
@@ -63,6 +65,8 @@ describe("runConnectAdapter", () => {
 		expect(mocks.persistConnectorConnection).toHaveBeenCalledWith("telegram", [
 			"-k",
 			"token",
+			"--cwd",
+			process.cwd(),
 		]);
 		expect(mocks.disableConnectorAutostart).not.toHaveBeenCalled();
 	});
@@ -70,10 +74,10 @@ describe("runConnectAdapter", () => {
 	it("persists a successful env-only connector start", async () => {
 		await expect(runConnectAdapter("telegram", [], io)).resolves.toBe(0);
 
-		expect(mocks.persistConnectorConnection).toHaveBeenCalledWith(
-			"telegram",
-			[],
-		);
+		expect(mocks.persistConnectorConnection).toHaveBeenCalledWith("telegram", [
+			"--cwd",
+			process.cwd(),
+		]);
 		expect(mocks.disableConnectorAutostart).not.toHaveBeenCalled();
 	});
 
@@ -99,6 +103,21 @@ describe("runConnectAdapter", () => {
 			"token",
 			"--bot-username",
 			"resolved_bot",
+			"--cwd",
+			process.cwd(),
+		]);
+	});
+
+	it("absolutizes an explicit --cwd when persisting", async () => {
+		await expect(
+			runConnectAdapter("telegram", ["-k", "token", "--cwd", "."], io),
+		).resolves.toBe(0);
+
+		expect(mocks.persistConnectorConnection).toHaveBeenCalledWith("telegram", [
+			"-k",
+			"token",
+			"--cwd",
+			process.cwd(),
 		]);
 	});
 
@@ -213,5 +232,62 @@ describe("runConnectAdapter", () => {
 
 		expect(stopAll).toHaveBeenCalledWith(io);
 		expect(mocks.disableConnectorAutostart).toHaveBeenCalledWith();
+	});
+
+	it("keeps autostart enabled for an internal restart stop", async () => {
+		const stopAll = vi.fn().mockResolvedValue({
+			stoppedProcesses: 1,
+			stoppedSessions: 0,
+		});
+		mocks.getConnector.mockResolvedValue({
+			name: "telegram",
+			description: "Telegram",
+			run: mocks.run,
+			showHelp: vi.fn(),
+			stopAll,
+		});
+
+		await expect(
+			runStopConnector("telegram", io, { disableAutostart: false }),
+		).resolves.toBe(0);
+
+		expect(stopAll).toHaveBeenCalledWith(io);
+		expect(mocks.disableConnectorAutostart).not.toHaveBeenCalled();
+	});
+
+	it("disables autostart for an explicit single-channel stop", async () => {
+		const stopAll = vi.fn().mockResolvedValue({
+			stoppedProcesses: 1,
+			stoppedSessions: 0,
+		});
+		mocks.getConnector.mockResolvedValue({
+			name: "telegram",
+			description: "Telegram",
+			run: mocks.run,
+			showHelp: vi.fn(),
+			stopAll,
+		});
+
+		await expect(runStopConnector("telegram", io)).resolves.toBe(0);
+
+		expect(stopAll).toHaveBeenCalledWith(io);
+		expect(mocks.disableConnectorAutostart).toHaveBeenCalledWith("telegram");
+	});
+});
+
+describe("withResolvedCwdPersistenceArgs", () => {
+	it("appends the absolute cwd when missing", () => {
+		expect(
+			withResolvedCwdPersistenceArgs(["-k", "token"], "/tmp/work"),
+		).toEqual(["-k", "token", "--cwd", "/tmp/work"]);
+	});
+
+	it("absolutizes a relative --cwd against the provided base", () => {
+		expect(
+			withResolvedCwdPersistenceArgs(
+				["-k", "token", "--cwd", "project"],
+				"/tmp/work",
+			),
+		).toEqual(["-k", "token", "--cwd", "/tmp/work/project"]);
 	});
 });

@@ -362,6 +362,10 @@ export async function runCli(): Promise<void> {
 		.description("Connect to an external channel")
 		.argument("[channel]", "Channel to connect Cline CLI to")
 		.option("--stop", "Kill all current channel connections")
+		.option(
+			"--keep-autostart",
+			"With --stop, keep connector autostart enabled (for internal restarts)",
+		)
 		.allowUnknownOption()
 		.passThroughOptions()
 		.addHelpText(
@@ -377,10 +381,13 @@ export async function runCli(): Promise<void> {
 			} = await import("./commands/connect");
 			const opts = connectCmd.opts();
 			if (opts.stop) {
+				const stopOptions = {
+					disableAutostart: opts.keepAutostart !== true,
+				};
 				if (adapter) {
-					ctx.exitCode = await runStopConnector(adapter, io);
+					ctx.exitCode = await runStopConnector(adapter, io, stopOptions);
 				} else {
-					ctx.exitCode = await runStopAllConnectors(io);
+					ctx.exitCode = await runStopAllConnectors(io, stopOptions);
 				}
 			} else if (adapter) {
 				// connectCmd.args = [adapter, ...passthroughFlags]. Pass only the

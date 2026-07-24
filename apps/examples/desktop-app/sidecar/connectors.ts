@@ -252,8 +252,11 @@ export async function startConnectorChannel(
 	const cliArgs = buildConnectorStartArgs(args);
 	const channel = cliArgs[0] ?? "";
 	if (listActiveConnectors().some((connector) => connector.type === channel)) {
+		// Restart stop: keep autostart enabled so a failed follow-up start does
+		// not permanently clear a previously auto-restored connector.
 		const stopResult = await runCliConnectCommand(workspaceRoot, [
 			"--stop",
+			"--keep-autostart",
 			channel,
 		]);
 		if (stopResult.code !== 0) {

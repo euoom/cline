@@ -1,3 +1,4 @@
+import { resolve as resolvePath } from "node:path";
 import {
 	disableConnectorAutostart,
 	persistConnectorConnection,
@@ -15,6 +16,38 @@ import type {
 
 const HELP_FLAGS = new Set(["-h", "--help"]);
 const INTERACTIVE_FLAGS = new Set(["-i", "--interactive"]);
+
+export type ConnectStopOptions = {
+	/** When false, leave autostart enabled (e.g. internal restart stop). */
+	disableAutostart?: boolean;
+};
+
+/**
+ * Ensure persisted connect args include an absolute `--cwd` so daemon reconnect
+ * restores the original workspace even when the host launch cwd differs.
+ */
+export function withResolvedCwdPersistenceArgs(
+	args: string[],
+	cwd: string = process.cwd(),
+): string[] {
+	const resolved = [...args];
+	for (let i = 0; i < resolved.length; i++) {
+		if (resolved[i] !== "--cwd") {
+			continue;
+		}
+		const value = resolved[i + 1];
+		if (
+			typeof value === "string" &&
+			value.length > 0 &&
+			!value.startsWith("-")
+		) {
+			resolved[i + 1] = resolvePath(cwd, value);
+			return resolved;
+		}
+		return resolved;
+	}
+	return [...resolved, "--cwd", resolvePath(cwd)];
+}
 
 export async function stopAllConnectors(
 	io: ConnectIo,
@@ -38,14 +71,19 @@ export async function stopAllConnectors(
 	return { stoppedProcesses, stoppedSessions, executed };
 }
 
-export async function runStopAllConnectors(io: ConnectIo): Promise<number> {
+export async function runStopAllConnectors(
+	io: ConnectIo,
+	options: ConnectStopOptions = {},
+): Promise<number> {
 	const { stoppedProcesses, stoppedSessions, executed } =
 		await stopAllConnectors(io);
 	if (executed === 0) {
 		io.writeln("[connect] no adapters support stop yet");
 		return 0;
 	}
-	disableConnectorAutostart();
+	if (options.disableAutostart !== false) {
+		disableConnectorAutostart();
+	}
 	io.writeln(
 		`[connect] stopped processes=${stoppedProcesses} sessions=${stoppedSessions}`,
 	);
@@ -55,6 +93,7 @@ export async function runStopAllConnectors(io: ConnectIo): Promise<number> {
 export async function runStopConnector(
 	adapterName: string,
 	io: ConnectIo,
+	options: ConnectStopOptions = {},
 ): Promise<number> {
 	const connector = await getConnector(adapterName);
 	if (!connector) {
@@ -66,7 +105,9 @@ export async function runStopConnector(
 		return 1;
 	}
 	const result: ConnectStopResult = await connector.stopAll(io);
-	disableConnectorAutostart(connector.name);
+	if (options.disableAutostart !== false) {
+		disableConnectorAutostart(connector.name);
+	}
 	io.writeln(
 		`[connect] ${connector.name} stopped processes=${result.stoppedProcesses} sessions=${result.stoppedSessions}`,
 	);
@@ -107,7 +148,10 @@ export async function runConnectAdapter(
 	) {
 		disableConnectorAutostart(connector.name);
 	} else if (exitCode === 0 && !isHelpInvocation && !isDetachedChild) {
-		persistConnectorConnection(connector.name, persistenceArgs);
+		persistConnectorConnection(
+			connector.name,
+			withResolvedCwdPersistenceArgs(persistenceArgs),
+		);
 	}
 	return exitCode;
 }
