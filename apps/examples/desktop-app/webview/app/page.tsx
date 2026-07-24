@@ -779,24 +779,9 @@ function ChatThreadPane({
 		[setConfig],
 	);
 
-	const handleUndoQueuedPrompt = useCallback(
+	const handleRemoveQueuedPrompt = useCallback(
 		async (item: PromptInQueue) => {
-			const removed = await removePromptInQueue(item.id);
-			const prompt = removed?.prompt.trim();
-			if (!prompt) {
-				return;
-			}
-			const attachmentCount =
-				removed?.attachmentCount ?? item.attachmentCount ?? 0;
-			if (attachmentCount > 0) {
-				toast({
-					title: "Queued attachments removed",
-					description: "Reattach files before sending the restored message.",
-				});
-			}
-			setPromptInput((current) =>
-				current.trim().length > 0 ? `${current}\n\n${prompt}` : prompt,
-			);
+			await removePromptInQueue(item.id);
 		},
 		[removePromptInQueue],
 	);
@@ -1149,8 +1134,8 @@ function ChatThreadPane({
 			onEditPromptInQueue={(promptId, prompt) => {
 				void updatePromptInQueue(promptId, prompt);
 			}}
-			onUndoPromptInQueue={(item) => {
-				void handleUndoQueuedPrompt(item);
+			onRemovePromptInQueue={(item) => {
+				void handleRemoveQueuedPrompt(item);
 			}}
 			onProviderChange={(nextProvider) =>
 				setConfig((prev) => {

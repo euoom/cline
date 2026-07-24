@@ -84,7 +84,7 @@ describe("ChatInputBar", () => {
 							onSend={vi.fn()}
 							onSteerPromptInQueue={vi.fn()}
 							onSwitchGitBranch={vi.fn(async () => true)}
-							onUndoPromptInQueue={vi.fn()}
+							onRemovePromptInQueue={vi.fn()}
 							promptInput=""
 							promptsInQueue={[]}
 							provider="cline"
@@ -164,7 +164,7 @@ describe("ChatInputBar", () => {
 						onSend={vi.fn()}
 						onSteerPromptInQueue={vi.fn()}
 						onSwitchGitBranch={vi.fn(async () => true)}
-						onUndoPromptInQueue={vi.fn()}
+						onRemovePromptInQueue={vi.fn()}
 						promptInput=""
 						promptsInQueue={[]}
 						provider="cline"
@@ -245,7 +245,7 @@ describe("ChatInputBar", () => {
 						onSend={vi.fn()}
 						onSteerPromptInQueue={onSteerPromptInQueue}
 						onSwitchGitBranch={vi.fn(async () => true)}
-						onUndoPromptInQueue={vi.fn()}
+						onRemovePromptInQueue={vi.fn()}
 						promptInput=""
 						promptsInQueue={[
 							{
@@ -269,12 +269,16 @@ describe("ChatInputBar", () => {
 		);
 		expect(queueToggle?.textContent).toContain("1 prompt queued");
 		expect(queueToggle?.getAttribute("aria-expanded")).toBe("false");
-		expect(container.querySelector("#queued-prompts")).toBeNull();
+		expect(
+			container.querySelector("#queued-prompts")?.hasAttribute("hidden"),
+		).toBe(true);
 
 		await act(async () => queueToggle?.click());
 
 		expect(queueToggle?.getAttribute("aria-expanded")).toBe("true");
-		expect(container.querySelector("#queued-prompts")?.textContent).toContain(
+		const queuedPrompts = container.querySelector("#queued-prompts");
+		expect(queuedPrompts?.hasAttribute("hidden")).toBe(false);
+		expect(queuedPrompts?.textContent).toContain(
 			"What else can we update the title to?",
 		);
 		expect(
