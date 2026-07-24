@@ -651,6 +651,7 @@ function App(props: TuiProps) {
 		onFork: props.onFork,
 		onUndo: openCheckpointRestore,
 		onExit: exitCline,
+		historyLimit: props.historyLimit,
 	});
 
 	const startupActionsRef = useRef({ openConfig, openHistory });

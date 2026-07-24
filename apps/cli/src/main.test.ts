@@ -871,6 +871,26 @@ describe("runCli lightweight command dispatch", () => {
 			expect.objectContaining({
 				initialPrompt: undefined,
 				startupTarget: "history",
+				historyLimit: 50,
+			}),
+		);
+	});
+
+	it("forwards history --limit into the interactive history picker", async () => {
+		process.argv = ["bun", "src/index.ts", "history", "--limit", "12"];
+
+		const { runCli } = await import("./main");
+
+		await expect(runCli()).resolves.toBeUndefined();
+		expect(historyMocks.runHistoryList).not.toHaveBeenCalled();
+		expect(runtimeMocks.runInteractive).toHaveBeenCalledTimes(1);
+		expect(runtimeMocks.runInteractive).toHaveBeenCalledWith(
+			expect.any(Object),
+			expect.anything(),
+			undefined,
+			expect.objectContaining({
+				startupTarget: "history",
+				historyLimit: 12,
 			}),
 		);
 	});

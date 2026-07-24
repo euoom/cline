@@ -141,6 +141,7 @@ export type RuntimeToolInteraction =
 export interface TuiProps {
 	config: Config;
 	startupTarget?: TuiStartupTarget;
+	historyLimit?: number;
 	initialPrompt?: string;
 	initialNotice?: CliMigrationNotice;
 	onInitialNoticeShown?: (notice: CliMigrationNotice) => void | Promise<void>;

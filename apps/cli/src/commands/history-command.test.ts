@@ -47,7 +47,22 @@ describe("registerHistoryCommand", () => {
 		await program.parseAsync(["history"], { from: "user" });
 
 		expect(setStartupTarget).toHaveBeenCalledOnce();
-		expect(setStartupTarget).toHaveBeenCalledWith("history");
+		expect(setStartupTarget).toHaveBeenCalledWith("history", {
+			historyLimit: 50,
+		});
+		expect(historyMocks.runHistoryList).not.toHaveBeenCalled();
+		expect(setExitCode).not.toHaveBeenCalled();
+	});
+
+	it("forwards --limit to the in-app history picker on a TTY", async () => {
+		const { program, setExitCode, setStartupTarget } = createHarness(true);
+
+		await program.parseAsync(["history", "--limit", "12"], { from: "user" });
+
+		expect(setStartupTarget).toHaveBeenCalledOnce();
+		expect(setStartupTarget).toHaveBeenCalledWith("history", {
+			historyLimit: 12,
+		});
 		expect(historyMocks.runHistoryList).not.toHaveBeenCalled();
 		expect(setExitCode).not.toHaveBeenCalled();
 	});

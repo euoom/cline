@@ -31,6 +31,7 @@ export function useLocalCommandActions(input: {
 	onFork: TuiProps["onFork"];
 	onUndo: () => Promise<void>;
 	onExit: TuiProps["onExit"];
+	historyLimit?: number;
 }) {
 	const dialog = useDialog();
 	const session = useSession();
@@ -51,6 +52,7 @@ export function useLocalCommandActions(input: {
 		onFork,
 		onUndo,
 		onExit,
+		historyLimit,
 	} = input;
 
 	const openHistory = useCallback(async () => {
@@ -58,7 +60,7 @@ export function useLocalCommandActions(input: {
 			size: "large",
 			style: { maxHeight: termHeight - 2 },
 			content: (ctx: ChoiceContext<string>) => (
-				<HistoryDialogContent {...ctx} />
+				<HistoryDialogContent {...ctx} limit={historyLimit} />
 			),
 		});
 		if (sessionId) {
@@ -98,6 +100,7 @@ export function useLocalCommandActions(input: {
 		refocusTextarea();
 	}, [
 		dialog,
+		historyLimit,
 		onResumeSession,
 		refocusTextarea,
 		session,

@@ -165,6 +165,7 @@ export async function runCli(): Promise<void> {
 	const ctx: {
 		exitCode?: number;
 		startupTarget?: TuiStartupTarget;
+		historyLimit?: number;
 	} = {};
 	const io = { writeln, writeErr };
 	const program = createProgram();
@@ -485,8 +486,11 @@ export async function runCli(): Promise<void> {
 		setExitCode: (code) => {
 			ctx.exitCode = code;
 		},
-		setStartupTarget: (target) => {
+		setStartupTarget: (target, options) => {
 			ctx.startupTarget = target;
+			if (options?.historyLimit !== undefined) {
+				ctx.historyLimit = options.historyLimit;
+			}
 		},
 		isInteractiveTTY: () => isFullTTY,
 	});
@@ -1122,6 +1126,7 @@ export async function runCli(): Promise<void> {
 				clineApiBaseUrl: initialClineProviderSettings?.baseUrl,
 				clineProviderSettings: initialClineProviderSettings,
 				startupTarget,
+				historyLimit: ctx.historyLimit,
 				initialNotice,
 				onInitialNoticeShown: markInitialNoticeShown,
 			});

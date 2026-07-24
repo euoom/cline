@@ -17,7 +17,10 @@ type RegisterHistoryCommandOptions = {
 	program: Command;
 	io: HistoryCommandIo;
 	setExitCode: (code: number) => void;
-	setStartupTarget: (target: TuiStartupTarget) => void;
+	setStartupTarget: (
+		target: TuiStartupTarget,
+		options?: { historyLimit?: number },
+	) => void;
 	isInteractiveTTY?: () => boolean;
 };
 
@@ -46,10 +49,11 @@ export function registerHistoryCommand({
 		.option("--config <dir>", "configuration directory")
 		.action(async () => {
 			const opts = historyCmd.opts();
-			const limit = Number.parseInt(opts.limit, 10);
+			const parsedLimit = Number.parseInt(opts.limit, 10);
+			const limit = Number.isFinite(parsedLimit) ? parsedLimit : 50;
 			const outputMode = resolveHistoryOutputMode(program, historyCmd);
 			if (outputMode === "text" && isInteractiveTTY()) {
-				setStartupTarget("history");
+				setStartupTarget("history", { historyLimit: limit });
 				return;
 			}
 			setExitCode(

@@ -135,6 +135,7 @@ export async function runInteractive(
 		clineApiBaseUrl?: string;
 		clineProviderSettings?: ProviderSettings;
 		startupTarget?: TuiStartupTarget;
+		historyLimit?: number;
 		initialPrompt?: string;
 		initialNotice?: CliMigrationNotice;
 		onInitialNoticeShown?: (notice: CliMigrationNotice) => void | Promise<void>;
@@ -468,6 +469,7 @@ export async function runInteractive(
 	tuiApp = await renderOpenTui({
 		config,
 		startupTarget: options?.startupTarget,
+		historyLimit: options?.historyLimit,
 		initialPrompt: options?.initialPrompt,
 		initialNotice: options?.initialNotice,
 		onInitialNoticeShown: options?.onInitialNoticeShown,
@@ -757,6 +759,9 @@ export async function runInteractive(
 			await sessionRuntime.restartWithCurrentMessages();
 		},
 		onResumeSession: async (sessionId: string) => {
+			// Match `cline --id` resume semantics so beforeRun dispatches
+			// agent_resume instead of agent_start.
+			process.env.CLINE_HOOK_AGENT_RESUME = "1";
 			await sessionRuntime.ensureReady();
 			const messages = await sessionRuntime.resumeSession(sessionId);
 			const usage = await sessionRuntime.getAccumulatedUsage({

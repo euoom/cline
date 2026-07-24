@@ -10,11 +10,27 @@ import { useTerminalDimensions } from "@opentui/react";
 import type { ChoiceContext } from "@opentui-ui/dialog";
 import { useDialogKeyboard } from "@opentui-ui/dialog/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listSessions } from "../../session/session";
+import { exportHistorySession } from "../../commands/history";
+import { deleteSession, listSessions } from "../../session/session";
 import { mergeHistoryStatusRows } from "../../utils/history-format";
 import { formatUsd } from "../../utils/output";
 import { shouldShowCliUsageCost } from "../../utils/usage-cost-display";
 import { palette } from "../palette";
+
+const DEFAULT_HISTORY_LIMIT = 50;
+const HISTORY_DIALOG_FOOTER =
+	"\u2191/\u2193 navigate, Enter to resume, \u2190 delete, \u2192 export, Esc to close";
+
+async function deleteHistoryDialogSession(sessionId: string): Promise<boolean> {
+	const result = await deleteSession(sessionId);
+	return result.deleted;
+}
+
+async function exportHistoryDialogSession(
+	sessionId: string,
+): Promise<string | undefined> {
+	return await exportHistorySession(sessionId, undefined);
+}
 
 function hasForkMetadata(row: SessionHistoryRecord): boolean {
 	const fork = row.metadata?.fork;
@@ -66,6 +82,7 @@ type HistoryListContentProps = HistoryListActions & {
 	emptyMessage?: string;
 	footerText?: string;
 	title?: string;
+	limit?: number;
 	loadRows?: boolean;
 	refreshRows?: () => Promise<SessionHistoryRecord[]>;
 	refreshIntervalMs?: number;
@@ -83,6 +100,7 @@ function HistoryListContent({
 	emptyMessage = "No sessions found",
 	footerText = "\u2191/\u2193 navigate, Enter to resume, Esc to close",
 	title = "Session History",
+	limit = DEFAULT_HISTORY_LIMIT,
 	loadRows = false,
 	refreshRows,
 	refreshIntervalMs = DEFAULT_REFRESH_INTERVAL_MS,
@@ -100,10 +118,12 @@ function HistoryListContent({
 		() => {},
 	);
 
+	const sessionLimit = Number.isFinite(limit) ? limit : DEFAULT_HISTORY_LIMIT;
+
 	useEffect(() => {
-		const loadInitialRows = () => listSessions(50, { hydrate: true });
+		const loadInitialRows = () => listSessions(sessionLimit, { hydrate: true });
 		const loadRefreshRows =
-			refreshRows ?? (() => listSessions(50, { hydrate: false }));
+			refreshRows ?? (() => listSessions(sessionLimit, { hydrate: false }));
 		let disposed = false;
 		let refreshInFlight = false;
 		let interval: ReturnType<typeof setInterval> | undefined;
@@ -167,7 +187,7 @@ function HistoryListContent({
 				clearInterval(interval);
 			}
 		};
-	}, [initialRows, loadRows, refreshIntervalMs, refreshRows]);
+	}, [initialRows, loadRows, refreshIntervalMs, refreshRows, sessionLimit]);
 
 	const safeSelected = Math.min(selected, Math.max(0, rows.length - 1));
 	const titleMaxLen = Math.max(20, width - 44);
@@ -405,8 +425,10 @@ function HistoryListContent({
 	);
 }
 
-export function HistoryDialogContent(props: ChoiceContext<string>) {
-	const { resolve, dismiss, dialogId } = props;
+export function HistoryDialogContent(
+	props: ChoiceContext<string> & { limit?: number },
+) {
+	const { resolve, dismiss, dialogId, limit } = props;
 	const [keyHandler, setKeyHandler] = useState<
 		((key: HistoryKeyEvent | undefined) => void) | undefined
 	>();
@@ -422,8 +444,12 @@ export function HistoryDialogContent(props: ChoiceContext<string>) {
 	return (
 		<HistoryListContent
 			loadRows
+			limit={limit}
 			onResolve={resolve}
 			onDismiss={dismiss}
+			onDelete={deleteHistoryDialogSession}
+			onExport={exportHistoryDialogSession}
+			footerText={HISTORY_DIALOG_FOOTER}
 			registerKeyHandler={registerKeyHandler}
 		/>
 	);
