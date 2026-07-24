@@ -780,7 +780,14 @@ function ChatThreadPane({
 
 	const handleRemoveQueuedPrompt = useCallback(
 		async (promptId: string) => {
-			await removePromptInQueue(promptId);
+			const removed = await removePromptInQueue(promptId);
+			const attachmentCount = removed?.attachmentCount ?? 0;
+			if (attachmentCount > 0) {
+				toast({
+					title: "Queued attachments removed",
+					description: "Attached files for this queued prompt were deleted.",
+				});
+			}
 		},
 		[removePromptInQueue],
 	);
