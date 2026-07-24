@@ -105,8 +105,9 @@ function parseStringArray(raw: unknown): string[] | undefined {
 		if (!Array.isArray(parsed)) {
 			return undefined;
 		}
-		const args = parsed.filter((value) => typeof value === "string");
-		return args.length > 0 ? args : undefined;
+		// Preserve empty arrays: env-only connects persist `[]` and must round-trip
+		// distinctly from a missing `connect_args_json` value.
+		return parsed.filter((value) => typeof value === "string");
 	} catch {
 		return undefined;
 	}

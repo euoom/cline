@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLINE_CONNECTOR_DETACHED_CHILD_ENV } from "../connectors/common";
+import {
+	CLINE_CONNECTOR_DETACHED_CHILD_ENV,
+	CONNECT_ALREADY_RUNNING_EXIT_CODE,
+} from "../connectors/common";
 import type { ConnectIo } from "../connectors/types";
 import { runConnectAdapter } from "./connect";
 
@@ -55,6 +58,27 @@ describe("runConnectAdapter", () => {
 			"-k",
 			"token",
 		]);
+		expect(mocks.disableConnectorAutostart).not.toHaveBeenCalled();
+	});
+
+	it("persists a successful env-only connector start with empty args", async () => {
+		await expect(runConnectAdapter("telegram", [], io)).resolves.toBe(0);
+
+		expect(mocks.persistConnectorConnection).toHaveBeenCalledWith(
+			"telegram",
+			[],
+		);
+		expect(mocks.disableConnectorAutostart).not.toHaveBeenCalled();
+	});
+
+	it("does not rewrite persistence when a connector is already running", async () => {
+		mocks.run.mockResolvedValue(CONNECT_ALREADY_RUNNING_EXIT_CODE);
+
+		await expect(
+			runConnectAdapter("telegram", ["-k", "token"], io),
+		).resolves.toBe(0);
+
+		expect(mocks.persistConnectorConnection).not.toHaveBeenCalled();
 		expect(mocks.disableConnectorAutostart).not.toHaveBeenCalled();
 	});
 
