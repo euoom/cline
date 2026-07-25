@@ -4,7 +4,6 @@ import {
 	type ConnectorCliLaunchSpec,
 	readConnectorCliLaunchSpec,
 } from "@cline/shared";
-import { listActiveConnectors } from "./active-connectors";
 import {
 	type ReconnectAttempt,
 	reconnectPersistedConnectors,
@@ -54,9 +53,14 @@ async function runConnectorCli(
 		};
 
 		try {
+			// `--restart` must precede the channel: connect uses passThroughOptions,
+			// so flags after the channel are forwarded to the adapter. Detached
+			// connector PIDs usually survive hub restarts but still hold the old
+			// hub session/auth, so recovery always force-restarts rather than
+			// treating a live PID as already healthy.
 			const child = spawnProcess(
 				spec.launcher,
-				[...spec.connectArgsPrefix, channel, ...args],
+				[...spec.connectArgsPrefix, "--restart", channel, ...args],
 				{
 					cwd: spec.cwd,
 					env: childEnv,
@@ -106,9 +110,6 @@ export async function reconnectDaemonConnectors(
 		process.stderr.write(`[hub-daemon] ${message}\n`),
 ): Promise<ReconnectAttempt[]> {
 	const launchSpec = readConnectorCliLaunchSpec();
-	const activeChannels = new Set(
-		listActiveConnectors().map((record) => record.type),
-	);
 	return await reconnectPersistedConnectors({
 		start: async (channel, args) => {
 			if (!launchSpec) {
@@ -119,7 +120,6 @@ export async function reconnectDaemonConnectors(
 			}
 			return await runConnectorCli(launchSpec, channel, args, log);
 		},
-		isActive: (channel) => activeChannels.has(channel),
 		log,
 	});
 }
