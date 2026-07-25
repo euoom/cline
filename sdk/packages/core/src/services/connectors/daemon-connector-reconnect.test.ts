@@ -158,4 +158,37 @@ describe("daemon connector CLI launcher", () => {
 			"[connect] restarting surviving telegram connector for the new hub session",
 		);
 	});
+
+	it("skips reconnect when multiple channel instances are already active", async () => {
+		mocks.readConnectorCliLaunchSpec.mockReturnValue(spec);
+		mocks.listActiveConnectors.mockReturnValue([
+			{
+				id: "telegram:bot_a",
+				type: "telegram",
+				pid: 123,
+				hubUrl: "ws://127.0.0.1:4317",
+				botUsername: "bot_a",
+			},
+			{
+				id: "telegram:bot_b",
+				type: "telegram",
+				pid: 456,
+				hubUrl: "ws://127.0.0.1:4317",
+				botUsername: "bot_b",
+			},
+		]);
+		mocks.reconnectPersistedConnectors.mockImplementation(async (options) => {
+			const ok = await options.start("telegram", ["-k", "token"]);
+			return [{ channel: "telegram", ok }];
+		});
+		const log = vi.fn();
+
+		await expect(reconnectDaemonConnectors(log)).resolves.toEqual([
+			{ channel: "telegram", ok: false },
+		]);
+		expect(mocks.spawnProcess).not.toHaveBeenCalled();
+		expect(log).toHaveBeenCalledWith(
+			"[connect] skipping telegram reconnect: 2 active instances; --restart would stop all of them",
+		);
+	});
 });

@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { setHomeDirIfUnset } from "@cline/core";
 import { isHubDaemonProcess } from "@cline/shared";
 import { prewarmWorkspaceMetadata } from "./chat-session";
+import { configureDesktopConnectorCliLaunch } from "./connectors";
 import {
 	createSidecarContext,
 	disposeSidecarContext,
@@ -58,6 +59,7 @@ async function main() {
 	});
 
 	prewarmWorkspaceMetadata(workspaceRoot);
+	configureDesktopConnectorCliLaunch(workspaceRoot);
 	observability.logger.log(
 		"Login shell PATH resolution",
 		await shellPathPromise,

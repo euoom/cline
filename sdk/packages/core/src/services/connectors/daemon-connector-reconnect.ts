@@ -116,9 +116,13 @@ export async function reconnectDaemonConnectors(
 		process.stderr.write(`[hub-daemon] ${message}\n`),
 ): Promise<ReconnectAttempt[]> {
 	const launchSpec = readConnectorCliLaunchSpec();
-	const activeChannels = new Set(
-		listActiveConnectors().map((record) => record.type),
-	);
+	const activeByChannel = new Map<string, number>();
+	for (const record of listActiveConnectors()) {
+		activeByChannel.set(
+			record.type,
+			(activeByChannel.get(record.type) ?? 0) + 1,
+		);
+	}
 	return await reconnectPersistedConnectors({
 		start: async (channel, args) => {
 			if (!launchSpec) {
@@ -127,7 +131,17 @@ export async function reconnectDaemonConnectors(
 				);
 				return false;
 			}
-			const restart = activeChannels.has(channel);
+			const activeCount = activeByChannel.get(channel) ?? 0;
+			// `--restart` stops every live instance of the adapter. With more
+			// than one active instance, that would destroy non-persisted
+			// siblings that share the channel type.
+			if (activeCount > 1) {
+				log(
+					`[connect] skipping ${channel} reconnect: ${activeCount} active instances; --restart would stop all of them`,
+				);
+				return false;
+			}
+			const restart = activeCount === 1;
 			if (restart) {
 				log(
 					`[connect] restarting surviving ${channel} connector for the new hub session`,

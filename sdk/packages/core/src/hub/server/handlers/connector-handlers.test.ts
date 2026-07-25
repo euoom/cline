@@ -104,6 +104,26 @@ describe("connector hub handlers", () => {
 		expect(readPersistedConnector("telegram")?.configured).toBe(false);
 	});
 
+	it("deletes dashboard config without clearing autostart state", () => {
+		useTempDataDir();
+		__test__.configureConnector({
+			channel: "telegram",
+			values: { "-k": "123456:fake-token" },
+		});
+		withConnectorStore((store) =>
+			store.recordConnected("telegram", ["-k", "123456:fake-token"]),
+		);
+
+		const response = __test__.deleteConnectorConfig({ channel: "telegram" });
+		expect(response.configured).toEqual([]);
+
+		const persisted = readPersistedConnector("telegram");
+		expect(persisted?.configured).toBe(false);
+		expect(persisted?.values).toEqual({});
+		expect(persisted?.connectArgs).toEqual(["-k", "123456:fake-token"]);
+		expect(persisted?.enabled).toBe(true);
+	});
+
 	it("refreshes reconnect args when a configured credential changes", () => {
 		useTempDataDir();
 		withConnectorStore((store) => {

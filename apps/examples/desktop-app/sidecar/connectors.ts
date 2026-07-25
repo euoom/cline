@@ -7,6 +7,7 @@ import {
 	buildConnectorConnectArgs,
 	CONNECTOR_PLATFORMS,
 	listConnectorCatalog,
+	setConnectorCliLaunchSpec,
 	withResolvedClineBuildEnv,
 } from "@cline/shared";
 import type { JsonRecord } from "./types";
@@ -133,6 +134,34 @@ function buildCliConnectCommand(
 		? ["--conditions=development", cliPath, "connect", ...args]
 		: ["connect", ...args];
 	return { launcher, childArgs };
+}
+
+/**
+ * Register how the shared hub daemon should relaunch `cline connect` after a
+ * restart. Must run before the sidecar ensures/spawns the detached hub.
+ */
+export function configureDesktopConnectorCliLaunch(
+	workspaceRoot: string,
+	options: {
+		execPath?: string;
+		cliPath?: string;
+		exists?: (path: string) => boolean;
+	} = {},
+	targetEnv: NodeJS.ProcessEnv = process.env,
+): void {
+	const { launcher, childArgs } = buildCliConnectCommand(
+		workspaceRoot,
+		[],
+		options,
+	);
+	setConnectorCliLaunchSpec(
+		{
+			launcher,
+			connectArgsPrefix: childArgs,
+			cwd: workspaceRoot,
+		},
+		targetEnv,
+	);
 }
 
 export function connectorChannelsPayload(): WebviewConnectorChannelsResponse {

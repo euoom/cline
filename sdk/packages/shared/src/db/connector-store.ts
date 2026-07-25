@@ -259,6 +259,37 @@ export class SqliteConnectorStore {
 			.run(nowIso());
 	}
 
+	/**
+	 * Clear dashboard configuration for a channel while preserving CLI
+	 * connection/autostart state (`connectArgs`, `enabled`, `lastConnectedAt`).
+	 * Deletes the row entirely when there is no connection state to keep.
+	 */
+	clearConfig(channel: string): boolean {
+		const existing = this.get(channel);
+		if (!existing) {
+			return false;
+		}
+		const hasConnectionState =
+			existing.connectArgs !== undefined ||
+			existing.enabled ||
+			existing.lastConnectedAt !== undefined;
+		if (!hasConnectionState) {
+			return this.delete(channel);
+		}
+		this.getRawDb()
+			.prepare(
+				`UPDATE connectors SET
+					configured = 0,
+					values_json = '{}',
+					security_enabled = 0,
+					security_values_json = '{}',
+					updated_at = ?
+				WHERE channel = ?`,
+			)
+			.run(nowIso(), channel);
+		return true;
+	}
+
 	delete(channel: string): boolean {
 		const changes =
 			this.getRawDb()

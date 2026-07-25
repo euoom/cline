@@ -140,6 +140,41 @@ describe("SqliteConnectorStore", () => {
 		});
 	});
 
+	it("clears dashboard config without dropping autostart state", () => {
+		useTempDataDir();
+		withStore((store) => {
+			store.upsertConfig({
+				channel: "telegram",
+				values: { "-k": "123:token" },
+				security: { enabled: true, values: { userId: "42" } },
+			});
+			store.recordConnected("telegram", ["-k", "123:token"]);
+			store.setEnabled("telegram", true);
+
+			expect(store.clearConfig("telegram")).toBe(true);
+			const record = store.get("telegram");
+			expect(record?.configured).toBe(false);
+			expect(record?.values).toEqual({});
+			expect(record?.security).toBeUndefined();
+			expect(record?.connectArgs).toEqual(["-k", "123:token"]);
+			expect(record?.enabled).toBe(true);
+			expect(record?.lastConnectedAt).toBeTruthy();
+		});
+	});
+
+	it("deletes config-only rows when clearing dashboard config", () => {
+		useTempDataDir();
+		withStore((store) => {
+			store.upsertConfig({
+				channel: "slack",
+				values: { "--bot-token": "xoxb" },
+			});
+			expect(store.clearConfig("slack")).toBe(true);
+			expect(store.get("slack")).toBeUndefined();
+			expect(store.clearConfig("slack")).toBe(false);
+		});
+	});
+
 	it("imports the legacy JSON settings file once and renames it", () => {
 		const root = useTempDataDir();
 		const legacyPath = join(root, "connectors", "settings.json");
