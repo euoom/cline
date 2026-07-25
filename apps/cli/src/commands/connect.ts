@@ -83,6 +83,22 @@ export async function runRestartConnector(
 	passthroughArgs: string[],
 	io: ConnectIo,
 ): Promise<number> {
+	const connector = await getConnector(adapterName);
+	if (!connector) {
+		io.writeErr(`unknown connect adapter "${adapterName}"`);
+		return 1;
+	}
+	// Validate the replacement before tearing down a healthy connector so a
+	// bad token or invalid flag combination cannot create an outage.
+	if (connector.validateForRestart) {
+		const validateExitCode = await connector.validateForRestart(
+			passthroughArgs,
+			io,
+		);
+		if (validateExitCode !== 0) {
+			return validateExitCode;
+		}
+	}
 	const stopExitCode = await runStopConnector(adapterName, io, {
 		autostart: "preserve",
 	});

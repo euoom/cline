@@ -144,6 +144,35 @@ describe("connector hub handlers", () => {
 		expect(persisted?.enabled).toBe(false);
 	});
 
+	it("replaces a Telegram CLI hook when dashboard security is enabled", () => {
+		useTempDataDir();
+		withConnectorStore((store) => {
+			store.recordConnected("telegram", [
+				"-k",
+				"123456:old-token",
+				"--hook-command",
+				"custom-hook",
+				"--cwd",
+				"/workspace",
+			]);
+		});
+
+		__test__.configureConnector({
+			channel: "telegram",
+			values: { "-k": "123456:old-token" },
+			security: { enabled: true, values: { userId: "123456789" } },
+		});
+
+		expect(readPersistedConnector("telegram")?.connectArgs).toEqual([
+			"--cwd",
+			"/workspace",
+			"-k",
+			"123456:old-token",
+			"--allowed-user-id",
+			"123456789",
+		]);
+	});
+
 	it("validates security fields before persisting connector settings", () => {
 		useTempDataDir();
 

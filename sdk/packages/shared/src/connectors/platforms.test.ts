@@ -67,6 +67,35 @@ describe("mergeConnectorConnectArgs", () => {
 		]);
 	});
 
+	it("strips a Telegram CLI hook when dashboard security is applied", () => {
+		expect(
+			mergeConnectorConnectArgs(
+				platform("telegram"),
+				[
+					"-k",
+					"old-token",
+					"--hook-command",
+					"custom-hook",
+					"--provider",
+					"openrouter",
+					"--cwd",
+					"/workspace",
+				],
+				["-k", "new-token", "--allowed-user-id", "123456789"],
+				{ replaceSecurityArgs: true },
+			),
+		).toEqual([
+			"--provider",
+			"openrouter",
+			"--cwd",
+			"/workspace",
+			"-k",
+			"new-token",
+			"--allowed-user-id",
+			"123456789",
+		]);
+	});
+
 	it.each([
 		["long flag", ["--bot-username", "old_bot"]],
 		["short flag", ["-m", "old_bot"]],

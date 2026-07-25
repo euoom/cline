@@ -10,6 +10,7 @@ import {
 } from "./daemon-connector-reconnect";
 
 const mocks = vi.hoisted(() => ({
+	disableConnectorAutostart: vi.fn(),
 	listActiveConnectors: vi.fn(),
 	readConnectorCliLaunchSpec: vi.fn(),
 	reconnectPersistedConnectors: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock("./connector-autostart", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("./connector-autostart")>();
 	return {
 		...actual,
+		disableConnectorAutostart: mocks.disableConnectorAutostart,
 		reconnectPersistedConnectors: mocks.reconnectPersistedConnectors,
 	};
 });
@@ -188,6 +190,7 @@ describe("daemon connector CLI launcher", () => {
 		]);
 
 		expect(mocks.spawnProcess).not.toHaveBeenCalled();
+		expect(mocks.disableConnectorAutostart).toHaveBeenCalledWith("telegram");
 		expect(log).toHaveBeenCalledWith(
 			"[connect] cannot safely reconnect telegram: found 2 surviving instances but persisted autostart state identifies only the channel",
 		);

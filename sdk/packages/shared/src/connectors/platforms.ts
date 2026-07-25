@@ -341,7 +341,9 @@ export const CONNECTOR_PLATFORMS: ConnectorPlatformDef[] = [
 					validate: validateTelegramUserId,
 				},
 			],
-			argumentFlags: ["--allowed-user-id"],
+			// Include --hook-command so dashboard security replaces a CLI hook;
+			// Telegram rejects combining both access controls.
+			argumentFlags: ["--allowed-user-id", "--hook-command"],
 			buildArgs: ({ userId }) => ["--allowed-user-id", userId ?? ""],
 		},
 	},

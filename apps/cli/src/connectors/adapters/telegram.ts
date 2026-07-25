@@ -416,6 +416,25 @@ class TelegramConnector extends ConnectorBase<
 		super("telegram", "Bridge Telegram bot messages into RPC chat sessions");
 	}
 
+	override async validateForRestart(
+		rawArgs: string[],
+		io: ConnectIo,
+	): Promise<number> {
+		let options: ConnectTelegramOptions;
+		try {
+			options = this.parseArgs(rawArgs);
+		} catch {
+			return super.validateForRestart(rawArgs, io);
+		}
+		try {
+			await resolveTelegramBotUsername(options);
+		} catch (error) {
+			io.writeErr(error instanceof Error ? error.message : String(error));
+			return 1;
+		}
+		return 0;
+	}
+
 	protected override createCommand(): Command {
 		return super
 			.createCommand()

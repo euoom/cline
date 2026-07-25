@@ -6,6 +6,7 @@ import {
 } from "@cline/shared";
 import { listActiveConnectors } from "./active-connectors";
 import {
+	disableConnectorAutostart,
 	type ReconnectAttempt,
 	reconnectPersistedConnectors,
 } from "./connector-autostart";
@@ -136,6 +137,9 @@ export async function reconnectDaemonConnectors(
 				log(
 					`[connect] cannot safely reconnect ${channel}: found ${activeCount} surviving instances but persisted autostart state identifies only the channel`,
 				);
+				// Clear the stuck channel-scoped autostart entry so later daemon
+				// boots do not keep failing on an unrecoverable multi-instance state.
+				disableConnectorAutostart(channel);
 				return false;
 			}
 			const restart = activeCount === 1;

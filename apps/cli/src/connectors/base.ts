@@ -53,6 +53,21 @@ export abstract class ConnectorBase<Options, State>
 		}
 	}
 
+	async validateForRestart(rawArgs: string[], io: ConnectIo): Promise<number> {
+		try {
+			this.parseArgs(rawArgs);
+			return 0;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (message === SHOW_HELP_ERROR) {
+				this.showHelp(io);
+				return 0;
+			}
+			io.writeErr(message);
+			return 1;
+		}
+	}
+
 	async run(
 		rawArgs: string[],
 		io: ConnectIo,

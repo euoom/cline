@@ -9,6 +9,14 @@ import {
 	reconnectPersistedConnectors,
 } from "./connector-autostart";
 
+const mocks = vi.hoisted(() => ({
+	listActiveConnectors: vi.fn(() => [] as Array<{ type: string }>),
+}));
+
+vi.mock("./active-connectors", () => ({
+	listActiveConnectors: mocks.listActiveConnectors,
+}));
+
 describe("connector autostart", () => {
 	const previousDataDir = process.env.CLINE_DATA_DIR;
 	const tempRoots: string[] = [];
@@ -22,6 +30,8 @@ describe("connector autostart", () => {
 		for (const root of tempRoots.splice(0)) {
 			rmSync(root, { recursive: true, force: true });
 		}
+		mocks.listActiveConnectors.mockReset();
+		mocks.listActiveConnectors.mockReturnValue([]);
 	});
 
 	function useTempDataDir(): void {
@@ -151,5 +161,32 @@ describe("connector autostart", () => {
 		const start = vi.fn().mockResolvedValue(true);
 		expect(await reconnectPersistedConnectors({ start })).toEqual([]);
 		expect(start).not.toHaveBeenCalled();
+	});
+
+	it("disables channel autostart instead of overwriting when a second instance starts", () => {
+		useTempDataDir();
+		persistConnectorConnection(
+			"telegram",
+			["-k", "111:first", "--bot-username", "first_bot"],
+			"/workspace",
+		);
+		mocks.listActiveConnectors.mockReturnValue([{ type: "telegram" }]);
+
+		persistConnectorConnection(
+			"telegram",
+			["-k", "222:second", "--bot-username", "second_bot"],
+			"/workspace",
+		);
+
+		const record = withStore((store) => store.get("telegram"));
+		expect(record?.enabled).toBe(false);
+		expect(record?.connectArgs).toEqual([
+			"-k",
+			"111:first",
+			"--bot-username",
+			"first_bot",
+			"--cwd",
+			"/workspace",
+		]);
 	});
 });

@@ -228,6 +228,7 @@ describe("runConnectAdapter", () => {
 			run: mocks.run,
 			showHelp: vi.fn(),
 			stopAll,
+			validateForRestart: vi.fn().mockResolvedValue(0),
 		});
 
 		await expect(
@@ -237,5 +238,30 @@ describe("runConnectAdapter", () => {
 		expect(stopAll).toHaveBeenCalledWith(io);
 		expect(mocks.disableConnectorAutostart).not.toHaveBeenCalled();
 		expect(mocks.persistConnectorConnection).not.toHaveBeenCalled();
+	});
+
+	it("does not stop a live connector when restart validation fails", async () => {
+		const stopAll = vi.fn().mockResolvedValue({
+			stoppedProcesses: 1,
+			stoppedSessions: 0,
+		});
+		const validateForRestart = vi.fn().mockResolvedValue(1);
+		mocks.getConnector.mockResolvedValue({
+			name: "telegram",
+			description: "Telegram",
+			run: mocks.run,
+			showHelp: vi.fn(),
+			stopAll,
+			validateForRestart,
+		});
+
+		await expect(
+			runRestartConnector("telegram", ["-k", "bad-token"], io),
+		).resolves.toBe(1);
+
+		expect(validateForRestart).toHaveBeenCalledWith(["-k", "bad-token"], io);
+		expect(stopAll).not.toHaveBeenCalled();
+		expect(mocks.run).not.toHaveBeenCalled();
+		expect(mocks.disableConnectorAutostart).not.toHaveBeenCalled();
 	});
 });

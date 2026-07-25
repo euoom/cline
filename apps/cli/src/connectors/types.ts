@@ -22,4 +22,9 @@ export interface ConnectCommandDefinition {
 	): Promise<number>;
 	showHelp(io: ConnectIo): void;
 	stopAll?(io: ConnectIo): Promise<ConnectStopResult>;
+	/**
+	 * Validate that a replacement launch can succeed before a restart stops the
+	 * live connector. Returns a non-zero exit code when validation fails.
+	 */
+	validateForRestart?(args: string[], io: ConnectIo): Promise<number>;
 }

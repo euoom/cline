@@ -1,4 +1,5 @@
 import { withConnectorStore } from "@cline/shared/db";
+import { listActiveConnectors } from "./active-connectors";
 
 const INTERACTIVE_FLAGS = new Set(["-i", "--interactive"]);
 
@@ -21,9 +22,24 @@ export function persistConnectorConnection(
 ): void {
 	try {
 		const reconnectArgs = normalizeReconnectArgs(rawArgs, cwd);
-		withConnectorStore((store) =>
-			store.recordConnected(channel, reconnectArgs),
-		);
+		const activeCount = listActiveConnectors().filter(
+			(connector) => connector.type === channel,
+		).length;
+		withConnectorStore((store) => {
+			const existing = store.get(channel);
+			// Channel-scoped autostart can restore only one instance. When another
+			// live instance already owns reconnect state, disable autostart instead
+			// of overwriting the first instance's arguments.
+			if (
+				activeCount >= 1 &&
+				existing?.enabled === true &&
+				existing.connectArgs !== undefined
+			) {
+				store.setEnabled(channel, false);
+				return;
+			}
+			store.recordConnected(channel, reconnectArgs);
+		});
 	} catch {
 		// Persistence is best-effort; never fail the connector start over it.
 	}

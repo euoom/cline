@@ -306,6 +306,31 @@ describe("telegram bot username resolution", () => {
 			__test__.fetchTelegramBotUsername("bad-token", fetchImpl),
 		).rejects.toThrow("Telegram getMe failed");
 	});
+
+	it("validates the bot token before a restart replaces a live connector", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				return new Response(
+					JSON.stringify({
+						ok: false,
+						description: "Unauthorized",
+					}),
+					{ status: 401, statusText: "Unauthorized" },
+				);
+			}),
+		);
+		const errors: string[] = [];
+
+		await expect(
+			telegramConnector.validateForRestart?.(["--bot-token", "bad-token"], {
+				writeln: () => {},
+				writeErr: (text) => errors.push(text),
+			}),
+		).resolves.toBe(1);
+
+		expect(errors[0]).toContain("Telegram getMe failed");
+	});
 });
 
 describe("telegram participant resolution", () => {
