@@ -86,6 +86,19 @@ export async function runStopConnector(
 		io.writeErr(`connect adapter "${adapterName}" does not support stop`);
 		return 1;
 	}
+	if (
+		options.instanceId &&
+		listActiveConnectors().some(
+			(record) =>
+				record.type === connector.name &&
+				record.instanceId === options.instanceId,
+		)
+	) {
+		io.writeErr(
+			`failed to stop ${connector.name} instance ${options.instanceId}`,
+		);
+		return 1;
+	}
 	if (options.autostart === "disable") {
 		disableConnectorAutostart(connector.name, options.instanceId);
 	}
@@ -134,12 +147,7 @@ export async function runRestartConnector(
 		adapterName,
 		instanceId,
 	);
-	if (!previousConnection) {
-		io.writeErr(
-			`cannot safely restart ${adapterName} instance ${instanceId}: no successful launch arguments are available for rollback`,
-		);
-		return 1;
-	}
+	const previousArgs = previousConnection?.lastSuccessfulArgs;
 	const stopExitCode = await runStopConnector(adapterName, io, {
 		autostart: "preserve",
 		instanceId,
@@ -159,12 +167,16 @@ export async function runRestartConnector(
 		return 0;
 	}
 
+	if (!previousArgs) {
+		return replacement.exitCode;
+	}
+
 	io.writeErr(
 		`[connect] replacement failed; restoring ${adapterName} instance ${instanceId}`,
 	);
 	const rollback = await runConnectAdapterWithResult(
 		adapterName,
-		previousConnection.lastSuccessfulArgs,
+		previousArgs,
 		io,
 	);
 	if (rollback.exitCode === 0) {
@@ -204,7 +216,11 @@ async function runConnectAdapterWithResult(
 	};
 	const exitCode = await connector.run(passthroughArgs, io, context);
 	if (exitCode === CONNECT_ALREADY_RUNNING_EXIT_CODE) {
-		return { exitCode: 0, instanceId: persistenceInstanceId };
+		// Preserve the distinct status for restart; normal connect maps it to 0.
+		return {
+			exitCode: CONNECT_ALREADY_RUNNING_EXIT_CODE,
+			instanceId: persistenceInstanceId,
+		};
 	}
 	const isHelpInvocation = passthroughArgs.some((arg) => HELP_FLAGS.has(arg));
 	const isInteractiveInvocation = passthroughArgs.some((arg) =>
@@ -239,8 +255,15 @@ export async function runConnectAdapter(
 	passthroughArgs: string[],
 	io: ConnectIo,
 ): Promise<number> {
-	return (await runConnectAdapterWithResult(adapterName, passthroughArgs, io))
-		.exitCode;
+	const result = await runConnectAdapterWithResult(
+		adapterName,
+		passthroughArgs,
+		io,
+	);
+	if (result.exitCode === CONNECT_ALREADY_RUNNING_EXIT_CODE) {
+		return 0;
+	}
+	return result.exitCode;
 }
 
 export function formatAdapterList(): string {

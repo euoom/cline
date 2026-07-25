@@ -259,10 +259,15 @@ export abstract class ConnectorBase<Options, State>
 			this.removeStateFile(input.statePath);
 			return { stoppedProcesses: 0, stoppedSessions: 0 };
 		}
+		const pid = input.getPid(state);
 		let stoppedProcesses = 0;
-		if (await terminateProcess(input.getPid(state))) {
+		if (await terminateProcess(pid)) {
 			stoppedProcesses = 1;
 			input.io.writeln(input.describeStoppedProcess(state));
+		} else if (isProcessRunning(pid)) {
+			// Keep state so a surviving process remains discoverable and restart
+			// cannot launch a duplicate against the same channel credentials.
+			return { stoppedProcesses: 0, stoppedSessions: 0 };
 		}
 		const stoppedSessions = await input.stopSessions(state);
 		input.clearBindings?.(state);
