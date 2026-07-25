@@ -66,4 +66,31 @@ describe("mergeConnectorConnectArgs", () => {
 			"app-token",
 		]);
 	});
+
+	it("drops a persisted Telegram bot username when credentials are reconfigured", () => {
+		expect(
+			mergeConnectorConnectArgs(
+				platform("telegram"),
+				[
+					"--provider",
+					"openrouter",
+					"-k",
+					"old-token",
+					"--bot-username",
+					"old_bot",
+					"--cwd",
+					"/workspace",
+				],
+				["-k", "new-token"],
+				{ replaceSecurityArgs: false },
+			),
+		).toEqual([
+			"--provider",
+			"openrouter",
+			"--cwd",
+			"/workspace",
+			"-k",
+			"new-token",
+		]);
+	});
 });

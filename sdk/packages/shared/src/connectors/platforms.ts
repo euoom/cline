@@ -222,6 +222,12 @@ export function mergeConnectorConnectArgs(
 			managedFlags.add(flag);
 		}
 	}
+	// Telegram persists a resolved --bot-username for reconnect. Drop it on
+	// configure so a rotated bot token cannot keep the previous bot identity.
+	if (platform.id === "telegram") {
+		managedFlags.add("--bot-username");
+		managedFlags.add("-m");
+	}
 
 	const preservedArgs: string[] = [];
 	for (let index = 0; index < existingArgs.length; index += 1) {
