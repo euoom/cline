@@ -44,6 +44,12 @@ export interface SdkFollowupCoordinatorOptions {
 	 * terminal phase or the footer stays stuck on Thinking/Cancel.
 	 */
 	onResumeFailed: () => void
+	/**
+	 * Called when a follow-up is abandoned because the displayed task changed.
+	 * askResponse pre-set streaming; this clears it without treating the newly
+	 * displayed task as a failed resume.
+	 */
+	onFollowUpAbandoned: () => void
 }
 
 export class SdkFollowupCoordinator {
@@ -80,8 +86,8 @@ export class SdkFollowupCoordinator {
 			// Task navigation does not use the rebuild scheduler. Do not deliver a
 			// prompt submitted from one task into a task selected while we waited.
 			if (task && this.options.getTask() !== task) {
-				Logger.log(
-					`[SdkController] askResponse: Task changed while waiting to resume ${task.taskId}; cancelling follow-up`,
+				await this.abandonFollowUpForTaskChange(
+					`askResponse: Task changed while waiting to resume ${task.taskId}; cancelling follow-up`,
 				)
 				return
 			}
@@ -141,7 +147,9 @@ export class SdkFollowupCoordinator {
 			await this.resumeSessionFromTask(task, prompt, images, files)
 		} catch (error) {
 			if (this.options.getTask() !== task) {
-				Logger.log(`[SdkController] Suppressing resume failure for task no longer displayed: ${task.taskId}`)
+				// Still clear the streaming phase askResponse pre-set; do not emit the
+				// failure into the newly displayed task's transcript.
+				await this.abandonFollowUpForTaskChange(`Suppressing resume failure for task no longer displayed: ${task.taskId}`)
 				return
 			}
 			Logger.error("[SdkController] Failed to resume session from task:", error)
@@ -181,7 +189,7 @@ export class SdkFollowupCoordinator {
 		const historyItem = await this.options.taskHistory.findHistoryItem(taskId)
 		const resumeStart = await prepareTaskResumeStartInput(this.options, taskId)
 		if (this.options.getTask() !== task) {
-			Logger.log(`[SdkController] Task changed before resume start for ${taskId}; cancelling follow-up`)
+			await this.abandonFollowUpForTaskChange(`Task changed before resume start for ${taskId}; cancelling follow-up`)
 			return
 		}
 
@@ -194,7 +202,7 @@ export class SdkFollowupCoordinator {
 
 		if (this.options.getTask() !== task) {
 			await this.endStartedResume(sdkHost, startResult.sessionId)
-			Logger.log(`[SdkController] Task changed during resume start for ${taskId}; cancelled follow-up`)
+			await this.abandonFollowUpForTaskChange(`Task changed during resume start for ${taskId}; cancelled follow-up`)
 			return
 		}
 
@@ -205,7 +213,9 @@ export class SdkFollowupCoordinator {
 				await this.options.taskHistory.updateTaskHistoryItem(historyItem)
 				if (this.options.getTask() !== task) {
 					await this.endStartedResume(sdkHost, startResult.sessionId)
-					Logger.log(`[SdkController] Task changed while updating history for ${taskId}; cancelled follow-up`)
+					await this.abandonFollowUpForTaskChange(
+						`Task changed while updating history for ${taskId}; cancelled follow-up`,
+					)
 					return
 				}
 			}
@@ -218,7 +228,9 @@ export class SdkFollowupCoordinator {
 			const resolvedPrompt = await this.options.resolveContextMentions(effectivePrompt)
 			if (this.options.getTask() !== task) {
 				await this.endStartedResume(sdkHost, startResult.sessionId)
-				Logger.log(`[SdkController] Task changed while resolving mentions for ${taskId}; cancelled follow-up`)
+				await this.abandonFollowUpForTaskChange(
+					`Task changed while resolving mentions for ${taskId}; cancelled follow-up`,
+				)
 				return
 			}
 
@@ -239,7 +251,9 @@ export class SdkFollowupCoordinator {
 			await this.options.postStateToWebview()
 			if (this.options.getTask() !== task) {
 				await this.endStartedResume(sdkHost, startResult.sessionId)
-				Logger.log(`[SdkController] Task changed while posting resumed state for ${taskId}; cancelled follow-up`)
+				await this.abandonFollowUpForTaskChange(
+					`Task changed while posting resumed state for ${taskId}; cancelled follow-up`,
+				)
 				return
 			}
 
@@ -257,6 +271,21 @@ export class SdkFollowupCoordinator {
 		if (activeSession?.sdkHost === sdkHost && activeSession.sessionId === sessionId) {
 			await this.options.sessions.endActiveSession("followupTargetChanged", { awaitStop: true })
 		}
+	}
+
+	/**
+	 * askResponse moves the turn phase to streaming before delegating here. When a
+	 * follow-up is abandoned because the user navigated away, clear that phase for
+	 * the newly displayed task so its footer does not stay on Thinking/Cancel.
+	 * clearTask already sets idle when nothing is displayed.
+	 */
+	private async abandonFollowUpForTaskChange(detail: string): Promise<void> {
+		Logger.log(`[SdkController] ${detail}`)
+		if (!this.options.getTask()) {
+			return
+		}
+		this.options.onFollowUpAbandoned()
+		await this.options.postStateToWebview()
 	}
 
 	private emitUserFeedback(sessionId: string, prompt?: string, images?: string[], files?: string[]): void {

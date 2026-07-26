@@ -85,12 +85,29 @@ export class SdkCompactionCoordinator {
 				return
 			}
 
+			const sessionId = activeSession.sessionId
 			this.compactInFlight = true
 			try {
-				await this.runCompaction(activeSession.sdkHost, activeSession.sessionId)
+				// Hold the same rebuild mutex as follow-up resume so an idle-session
+				// send cannot interleave with read → compact → persist on this host.
+				await this.options.rebuilds.runExclusive(async () => {
+					const active = this.options.sessions.getActiveSession()
+					if (!active || active.sessionId !== sessionId) {
+						Logger.log(
+							`[SdkController] compactTask: Active session changed while waiting to compact ${sessionId}; cancelling`,
+						)
+						return
+					}
+					if (active.isRunning) {
+						this.emitInfo(COMPACTION_TURN_RUNNING_MESSAGE, sessionId)
+						await this.options.postStateToWebview()
+						return
+					}
+					await this.runCompaction(active.sdkHost, sessionId)
+				})
 			} catch (error) {
 				Logger.error("[SdkController] compactTask failed:", error)
-				this.emitInfo(COMPACTION_FAILURE_MESSAGE, activeSession.sessionId)
+				this.emitInfo(COMPACTION_FAILURE_MESSAGE, sessionId)
 				await this.options.postStateToWebview()
 			} finally {
 				this.compactInFlight = false

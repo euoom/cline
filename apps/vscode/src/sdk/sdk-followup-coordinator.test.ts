@@ -322,6 +322,41 @@ describe("SdkFollowupCoordinator", () => {
 		expect(replacementTask.taskId).toBe("task-2")
 		expect(options.sessions.endActiveSession).toHaveBeenCalledWith("followupTargetChanged", { awaitStop: true })
 		expect(options.sessions.fireAndForgetSend).not.toHaveBeenCalled()
+		// askResponse pre-sets streaming; abandoning the resume must clear it so the
+		// newly displayed task's footer does not stay on Thinking/Cancel.
+		expect(options.onFollowUpAbandoned).toHaveBeenCalledOnce()
+		expect(options.onResumeFailed).not.toHaveBeenCalled()
+		expect(options.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("clears the streaming phase when the task changes while waiting to resume", async () => {
+		const task = makeTask("task-1")
+		const replacementTask = makeTask("task-2")
+		const { coordinator, options } = makeCoordinator({ task })
+		options.getTask.mockReturnValueOnce(task).mockReturnValue(replacementTask)
+
+		await coordinator.askResponse("continue")
+
+		expect(options.sessions.startNewSession).not.toHaveBeenCalled()
+		expect(options.sessions.fireAndForgetSend).not.toHaveBeenCalled()
+		expect(options.onFollowUpAbandoned).toHaveBeenCalledOnce()
+		expect(options.onResumeFailed).not.toHaveBeenCalled()
+	})
+
+	it("clears the streaming phase when resume fails after the displayed task changed", async () => {
+		const task = makeTask("task-1")
+		const replacementTask = makeTask("task-2")
+		const { coordinator, options } = makeCoordinator({ task })
+		options.sessions.startNewSession.mockImplementationOnce(async () => {
+			options.getTask.mockReturnValue(replacementTask)
+			throw new Error("session start failed")
+		})
+
+		await coordinator.askResponse("continue")
+
+		expect(options.messages.emitSessionEvents).not.toHaveBeenCalled()
+		expect(options.onFollowUpAbandoned).toHaveBeenCalledOnce()
+		expect(options.onResumeFailed).not.toHaveBeenCalled()
 	})
 
 	it("holds transcript preparation and session start inside the rebuild scheduler", async () => {
@@ -506,6 +541,7 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 		waitForPendingRebuilds: input.waitForPendingRebuilds ?? vi.fn().mockResolvedValue(undefined),
 		runExclusive: input.runExclusive ?? vi.fn(async (operation: () => Promise<unknown>) => operation()),
 		onResumeFailed: vi.fn(),
+		onFollowUpAbandoned: vi.fn(),
 	} as unknown as SdkFollowupCoordinatorOptions & {
 		interactions: SdkFollowupCoordinatorOptions["interactions"] & {
 			resolvePendingToolApproval: ReturnType<typeof vi.fn>
@@ -541,6 +577,7 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 		postStateToWebview: ReturnType<typeof vi.fn>
 		runExclusive: ReturnType<typeof vi.fn>
 		onResumeFailed: ReturnType<typeof vi.fn>
+		onFollowUpAbandoned: ReturnType<typeof vi.fn>
 	}
 
 	return {

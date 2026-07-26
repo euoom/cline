@@ -61,11 +61,45 @@ describe("SdkCompactionCoordinator", () => {
 
 		await coordinator.compactTask()
 
+		expect(options.rebuilds.runExclusive).toHaveBeenCalledOnce()
 		expect(mockCreateContextCompactionPrepareTurn).not.toHaveBeenCalled()
 		expect(options.messages.appendAndEmit).toHaveBeenCalledWith(
 			[expect.objectContaining({ say: "info", text: "No messages to compact." })],
 			expect.anything(),
 		)
+	})
+
+	it("holds active-session compaction inside the rebuild mutex", async () => {
+		const activeSession = makeActiveSession()
+		activeSession.sdkHost.readMessages.mockResolvedValueOnce([{ role: "user", content: "1" }])
+		mockCreateContextCompactionPrepareTurn.mockReturnValueOnce(
+			vi.fn().mockResolvedValue({ messages: [{ role: "user", content: "summary" }] }),
+		)
+		let runOperation: (() => Promise<void>) | undefined
+		const runExclusive = vi.fn(
+			(operation: () => Promise<void>) =>
+				new Promise<void>((resolve, reject) => {
+					runOperation = async () => {
+						try {
+							await operation()
+							resolve()
+						} catch (error) {
+							reject(error)
+						}
+					}
+				}),
+		)
+		const { coordinator, options } = makeCoordinator({ activeSession })
+		options.rebuilds.runExclusive = runExclusive
+
+		const compactPromise = coordinator.compactTask()
+		await vi.waitFor(() => expect(runExclusive).toHaveBeenCalledOnce())
+		expect(activeSession.sdkHost.readMessages).not.toHaveBeenCalled()
+
+		await runOperation?.()
+		await compactPromise
+
+		expect(activeSession.sdkHost.updateSessionCompactionState).toHaveBeenCalledOnce()
 	})
 
 	it("reports unsupported runtime without running compaction", async () => {
@@ -156,7 +190,8 @@ describe("SdkCompactionCoordinator", () => {
 		const activeSession = makeActiveSession()
 		const { coordinator, options } = makeCoordinator({ activeSession })
 		options.sessions.getActiveSession
-			.mockReturnValueOnce(activeSession)
+			.mockReturnValueOnce(activeSession) // compactTask entry check
+			.mockReturnValueOnce(activeSession) // re-check inside runExclusive
 			.mockReturnValue(makeActiveSession({ sessionId: "other-session" }))
 		mockCreateContextCompactionPrepareTurn.mockReturnValueOnce(
 			vi.fn().mockResolvedValue({ messages: [{ role: "user", content: "summary" }] }),

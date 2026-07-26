@@ -526,6 +526,12 @@ export class Controller {
 			onResumeFailed: () => {
 				this.turnStateTracker.set("error")
 			},
+			onFollowUpAbandoned: () => {
+				// Only clear the askResponse pre-set when nothing else has taken over.
+				if (this.turnStateTracker.currentPhase === "streaming" && !this.sessions.getActiveSession()?.isRunning) {
+					this.turnStateTracker.set("idle")
+				}
+			},
 		})
 		this.taskControl = new SdkTaskControlCoordinator({
 			sessions: this.sessions,
