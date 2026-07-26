@@ -63,6 +63,7 @@ import {
 	broadcastEvent,
 	ensureSharedHubClient,
 	resolveSidecarAskQuestion,
+	settleSessionLogWrites,
 } from "./context";
 import {
 	installMarketplaceEntryForDesktopCommand,
@@ -1319,6 +1320,7 @@ export async function handleCommand(
 				directoryCandidates.add(dirname(path));
 			}
 		}
+		await settleSessionLogWrites(sessionId);
 		for (const path of [sessionLogPath(sessionId)]) {
 			if (removePathIfExists(path, { recursive: true })) {
 				deleted = true;

@@ -89,6 +89,16 @@ function appendSessionChunk(
 	});
 }
 
+// Waits for any queued log appends and drops the per-session queue, so a
+// pending write cannot recreate a session log that is being deleted from disk.
+export async function settleSessionLogWrites(sessionId: string): Promise<void> {
+	const tail = sessionLogWriteTails.get(sessionId);
+	sessionLogWriteTails.delete(sessionId);
+	if (tail) {
+		await tail;
+	}
+}
+
 function emitChunk(
 	ctx: SidecarContext,
 	sessionId: string,

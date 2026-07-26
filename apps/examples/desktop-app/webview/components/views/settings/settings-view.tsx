@@ -318,6 +318,9 @@ export function SettingsView({
 			window.alert(`Failed to sign in to ${id}: ${message}`);
 		} finally {
 			setOauthSigningProviderId(null);
+			// Keep the shared short-lived catalog cache (composer model
+			// selector, onboarding) in sync with the just-saved OAuth auth.
+			invalidateProviderCatalogCache();
 		}
 	};
 

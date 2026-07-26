@@ -1403,6 +1403,10 @@ export function useChatSession() {
 					setStatus("cancelled");
 					return;
 				}
+				// Drain buffered stream deltas before replacing the assistant
+				// content with the finalized RPC text; otherwise a later timer
+				// flush would append a stale suffix onto the final message.
+				flushPendingStream();
 				const assistantText = (result?.text ?? "").trim();
 				const fallbackAssistantTurn = extractAssistantTurnDataFromRpcMessages(
 					result?.messages,
@@ -1478,6 +1482,7 @@ export function useChatSession() {
 							{ sessionId: activeSessionId, maxMessages: MAX_MESSAGES },
 						);
 						if (historyMessages.length > 0) {
+							flushPendingStream();
 							setMessages(historyMessages);
 						}
 					} catch {
@@ -1498,6 +1503,7 @@ export function useChatSession() {
 						{ sessionId: activeSessionId, maxMessages: MAX_MESSAGES },
 					);
 					if (historyMessages.length > 0) {
+						flushPendingStream();
 						setMessages(historyMessages);
 					}
 				} catch {
@@ -1603,6 +1609,7 @@ export function useChatSession() {
 			clearAbortFallbackTimeout,
 			clearLiveToolRefs,
 			config,
+			flushPendingStream,
 			hydratedHistorySessionId,
 			materializeToolMessagesFromResult,
 			refreshSessionDiffSummary,
