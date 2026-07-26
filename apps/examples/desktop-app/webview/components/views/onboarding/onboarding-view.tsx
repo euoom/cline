@@ -27,7 +27,10 @@ import {
 	readModelSelectionStorageFromWindow,
 	writeModelSelectionStorageToWindow,
 } from "@/lib/model-selection";
-import { fetchProviderCatalog } from "@/lib/provider-model-catalog";
+import {
+	fetchProviderCatalog,
+	invalidateProviderCatalogCache,
+} from "@/lib/provider-model-catalog";
 import type { Provider } from "@/lib/provider-schema";
 
 const CREATE_ACCOUNT_URL = "https://app.cline.bot";
@@ -297,6 +300,7 @@ function ConnectStep({
 				enabled: true,
 				api_key: key,
 			});
+			invalidateProviderCatalogCache();
 			// Verify the key against the account API before advancing; the
 			// account context swallows errors, so an invalid key would
 			// otherwise onboard the user into a broken signed-in state.
@@ -314,6 +318,7 @@ function ConnectStep({
 						api_key: "",
 					})
 					.catch(() => undefined);
+				invalidateProviderCatalogCache();
 				const message =
 					verifyError instanceof Error
 						? verifyError.message
@@ -345,6 +350,7 @@ function ConnectStep({
 				enabled: true,
 				api_key: apiKey.trim(),
 			});
+			invalidateProviderCatalogCache();
 			rememberProviderSelection(selectedProvider);
 			onConnected({
 				kind: "provider",

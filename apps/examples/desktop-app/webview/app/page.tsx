@@ -273,6 +273,9 @@ export default function Home() {
 					// shell; hiding the shell keeps its aurora + animations from
 					// being composited every frame underneath while it still mounts
 					// and loads (providers, history, transport) in the background.
+					// `inert` keeps the hidden shell out of the tab order so keyboard
+					// focus cannot reach controls underneath the overlay.
+					inert={showOnboarding ? true : undefined}
 					style={showOnboarding ? { visibility: "hidden" } : undefined}
 				>
 					<Sidebar
@@ -767,12 +770,14 @@ function ChatThreadPane({
 				return;
 			}
 			onThreadStarted?.(threadId);
-			promptInputRef.current = "";
+			// Clear through setPromptInput so promptDraft is bumped too; otherwise
+			// a remounted ChatInputBar would re-initialize from a stale draft.
+			setPromptInput("");
 			const toSend = [...pendingAttachments];
 			setPendingAttachments([]);
 			await sendPrompt(trimmed, toSend);
 		},
-		[onThreadStarted, pendingAttachments, sendPrompt, threadId],
+		[onThreadStarted, pendingAttachments, sendPrompt, threadId, setPromptInput],
 	);
 
 	const handleReasoningChange = useCallback(

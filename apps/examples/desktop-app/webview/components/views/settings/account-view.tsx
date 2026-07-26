@@ -27,6 +27,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAccount } from "@/contexts/account-context";
 import { desktopClient, openExternalUrl } from "@/lib/desktop-client";
+import { invalidateProviderCatalogCache } from "@/lib/provider-model-catalog";
 import { cn } from "@/lib/utils";
 
 const DASHBOARD_URL = "https://app.cline.bot/dashboard";
@@ -274,6 +275,7 @@ export function AccountView() {
 					},
 				},
 			});
+			invalidateProviderCatalogCache();
 			resetAccountData();
 			setActiveTab("overview");
 			setOverviewError("No Cline account auth token found");
