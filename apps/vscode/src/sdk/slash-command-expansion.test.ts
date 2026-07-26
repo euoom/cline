@@ -179,6 +179,14 @@ describe("buildDisabledWorkflowNames", () => {
 		expect(disabled).toEqual(new Set(["org-standards"]))
 	})
 
+	it("matches the remote toggle by file basename even when frontmatter renames the command", () => {
+		const disabled = buildDisabledWorkflowNames({
+			records: [{ name: "org-ship-it", filePath: "/repo/.cline/remote-config/workflows/org-standards.md" }],
+			remoteToggles: { "Org Standards": false },
+		})
+		expect(disabled).toEqual(new Set(["org-ship-it"]))
+	})
+
 	it("matches remote toggles for names longer than the materializer's 80-char cap", () => {
 		const longConfigName = "a".repeat(100)
 		const materializedName = "a".repeat(80)

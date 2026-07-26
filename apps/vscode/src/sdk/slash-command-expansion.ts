@@ -62,11 +62,12 @@ function sanitizeRemoteSegment(value: string): string {
 }
 
 /**
- * Comparison key for remote workflow names. The discovered record is named
- * after the sanitized file basename, while remote toggles are keyed by the
- * original config name (e.g. "Org Standards"), so apply the materializer's
- * exact transformation to both sides before comparing (it is idempotent on
- * already-sanitized names).
+ * Comparison key for remote workflow names. Remote toggles are keyed by the
+ * original config name (e.g. "Org Standards"), which the materializer
+ * sanitizes into the file basename, so apply its exact transformation to both
+ * sides before comparing (it is idempotent on already-sanitized names).
+ * Records are keyed by their file basename, not `record.name`: a frontmatter
+ * `name` that differs from the config name would never match the toggle key.
  */
 function remoteWorkflowNameKey(value: string): string {
 	return sanitizeRemoteSegment(value.replace(WORKFLOW_FILE_EXTENSION_REGEX, ""))
@@ -238,7 +239,7 @@ export function buildDisabledWorkflowNames(options: BuildDisabledWorkflowNamesOp
 		}
 		let enabled: boolean
 		if (REMOTE_CONFIG_PATH_REGEX.test(record.filePath)) {
-			const remoteKey = remoteWorkflowNameKey(record.name)
+			const remoteKey = remoteWorkflowNameKey(fileBasename(record.filePath))
 			enabled = remoteAlwaysEnabled.has(remoteKey) || remoteToggles.get(remoteKey) !== false
 		} else {
 			enabled = enabledByBasename.get(canonicalWorkflowName(fileBasename(record.filePath))) ?? true

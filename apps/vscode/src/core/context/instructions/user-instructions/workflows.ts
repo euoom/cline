@@ -11,8 +11,14 @@ import { Controller } from "@/core/controller"
  * - a toggle the user flips mid-scan must win over the stale snapshot value;
  * - an entry added mid-scan (e.g. a workflow file created via the modal) must
  *   be kept even though the older scan didn't see the file;
+ * - entries removed mid-scan (the file was deleted) are pruned even when the
+ *   older scan still saw the file;
  * - entries that existed before the scan but whose files the scan no longer
  *   found are pruned (the file was deleted).
+ *
+ * `preScan` must be a snapshot copy taken before the scan started: the state
+ * manager hands out its live cache object, which other code mutates in place,
+ * so reading the key again after the scan would alias `current`.
  */
 function mergeToggleStateAfterScan(
 	scanned: ClineRulesToggles,
@@ -23,6 +29,11 @@ function mergeToggleStateAfterScan(
 	for (const [key, value] of Object.entries(current)) {
 		if (key in merged || !(key in preScan)) {
 			merged[key] = value
+		}
+	}
+	for (const key of Object.keys(preScan)) {
+		if (!(key in current)) {
+			delete merged[key]
 		}
 	}
 	return merged
@@ -38,8 +49,9 @@ export async function refreshWorkflowToggles(
 	globalWorkflowToggles: ClineRulesToggles
 	localWorkflowToggles: ClineRulesToggles
 }> {
-	// Global workflows
-	const globalWorkflowToggles = controller.stateManager.getGlobalSettingsKey("globalWorkflowToggles")
+	// Global workflows. Copy the pre-scan state: the state manager returns its
+	// live cache object, which concurrent updates mutate in place.
+	const globalWorkflowToggles = { ...controller.stateManager.getGlobalSettingsKey("globalWorkflowToggles") }
 	const globalClineWorkflowsFilePath = await ensureWorkflowsDirectoryExists()
 	const scannedGlobalToggles = await synchronizeRuleToggles(globalClineWorkflowsFilePath, globalWorkflowToggles)
 	// Re-read state after the async scans: no `await` between here and the
@@ -51,7 +63,7 @@ export async function refreshWorkflowToggles(
 	)
 	controller.stateManager.setGlobalState("globalWorkflowToggles", updatedGlobalWorkflowToggles)
 
-	const workflowRulesToggles = controller.stateManager.getWorkspaceStateKey("workflowToggles")
+	const workflowRulesToggles = { ...controller.stateManager.getWorkspaceStateKey("workflowToggles") }
 	const workflowsDirPath = path.resolve(workingDirectory, GlobalFileNames.workflows)
 	const scannedWorkspaceToggles = await synchronizeRuleToggles(workflowsDirPath, workflowRulesToggles)
 	const updatedWorkflowToggles = mergeToggleStateAfterScan(
