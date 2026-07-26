@@ -81,7 +81,11 @@
         "@sap-cloud-sdk/resilience": "4.6.0",
         "@sap-cloud-sdk/util": "4.6.0",
         "inline-style-parser": "0.2.9",
-        "tar": "7.5.21"
+        "tar": "7.5.21",
+        "ws": "8.21.1",
+        "fast-uri": "3.1.4",
+        "next": "16.2.11",
+        "undici": "7.28.0"
     },
     "trustedDependencies": [
         "better-sqlite3",
