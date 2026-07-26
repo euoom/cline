@@ -829,6 +829,8 @@ export class Controller {
 			const disabledWorkflowNames = buildDisabledWorkflowNames(
 				this.stateManager.getGlobalSettingsKey("globalWorkflowToggles"),
 				this.stateManager.getWorkspaceStateKey("workflowToggles"),
+				this.stateManager.getGlobalStateKey("remoteWorkflowToggles"),
+				this.stateManager.getRemoteConfigSettings().remoteGlobalWorkflows,
 			)
 			return expandSlashCommands(text, service.listRuntimeCommands(), disabledWorkflowNames)
 		} catch (error) {

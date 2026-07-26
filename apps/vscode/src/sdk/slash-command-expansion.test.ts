@@ -22,6 +22,11 @@ describe("expandSlashCommands", () => {
 		expect(expandSlashCommands("/release.md now", commands)).toBe("Run the release workflow. now")
 	})
 
+	it("expands the filename spelling for other workflow extensions", () => {
+		expect(expandSlashCommands("/release.txt now", commands)).toBe("Run the release workflow. now")
+		expect(expandSlashCommands("/release.markdown now", commands)).toBe("Run the release workflow. now")
+	})
+
 	it("matches case-insensitively as a fallback, like webview validation", () => {
 		expect(expandSlashCommands("/Release.MD", commands)).toBe("Run the release workflow.")
 	})
@@ -66,12 +71,26 @@ describe("buildDisabledWorkflowNames", () => {
 		expect(disabled).toEqual(new Set(["release.md", "release"]))
 	})
 
-	it("lets workspace toggles override global toggles for the same file name", () => {
+	it("indexes non-md workflow extensions the SDK accepts", () => {
 		const disabled = buildDisabledWorkflowNames(
-			{ "/global/dir/release.md": false },
-			{ "/repo/.clinerules/workflows/release.md": true },
+			{ "/global/dir/deploy.txt": false, "/global/dir/notes.markdown": false },
+			undefined,
 		)
-		expect(disabled.size).toBe(0)
+		expect(disabled).toEqual(new Set(["deploy.txt", "deploy", "notes.markdown", "notes"]))
+	})
+
+	it("keeps a name enabled when any scope enables it", () => {
+		// Workspace-enabled shadows a disabled global...
+		expect(
+			buildDisabledWorkflowNames({ "/global/dir/release.md": false }, { "/repo/.clinerules/workflows/release.md": true })
+				.size,
+		).toBe(0)
+		// ...and a disabled workspace workflow does not hide an enabled global
+		// one, matching the slash menu.
+		expect(
+			buildDisabledWorkflowNames({ "/global/dir/release.md": true }, { "/repo/.clinerules/workflows/release.md": false })
+				.size,
+		).toBe(0)
 	})
 
 	it("collects disabled names from both scopes", () => {
@@ -80,5 +99,14 @@ describe("buildDisabledWorkflowNames", () => {
 			{ "C:\\repo\\.clinerules\\workflows\\hotfix.md": false },
 		)
 		expect(disabled).toEqual(new Set(["deploy.md", "deploy", "hotfix.md", "hotfix"]))
+	})
+
+	it("honors remote workflow toggles, defaulting to enabled and respecting alwaysEnabled", () => {
+		const disabled = buildDisabledWorkflowNames(undefined, undefined, { "turned-off": false, "locked-on": false }, [
+			{ name: "turned-off", alwaysEnabled: false },
+			{ name: "locked-on", alwaysEnabled: true },
+			{ name: "untoggled", alwaysEnabled: false },
+		])
+		expect(disabled).toEqual(new Set(["turned-off"]))
 	})
 })
