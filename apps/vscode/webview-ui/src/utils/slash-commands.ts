@@ -1,6 +1,11 @@
 import type { McpServer } from "@shared/mcp"
 import { PLATFORM_CONFIG, PlatformType } from "@/config/platform.config"
-import { BASE_SLASH_COMMANDS, type SlashCommand, VSCODE_ONLY_COMMANDS } from "../../../src/shared/slashCommands.ts"
+import {
+	BASE_SLASH_COMMANDS,
+	remoteWorkflowCommandName,
+	type SlashCommand,
+	VSCODE_ONLY_COMMANDS,
+} from "../../../src/shared/slashCommands.ts"
 
 export type { SlashCommand }
 
@@ -59,7 +64,10 @@ function getWorkflowCommands(
 			const enabled = workflow.alwaysEnabled || remoteWorkflowToggles[workflow.name] !== false
 			if (enabled) {
 				remoteWorkflowCommands.push({
-					name: workflow.name,
+					// Insert the sanitized command name the materialized workflow
+					// is actually invoked by — the config name may contain
+					// characters (e.g. spaces) a slash token can't carry.
+					name: remoteWorkflowCommandName(workflow.name),
 					section: "custom",
 				})
 			}

@@ -1,6 +1,6 @@
 import { EmptyRequest } from "@shared/proto/cline/common"
 import { SlashCommandInfo, SlashCommandsResponse } from "@shared/proto/cline/slash"
-import { BASE_SLASH_COMMANDS } from "@/shared/slashCommands"
+import { BASE_SLASH_COMMANDS, remoteWorkflowCommandName } from "@/shared/slashCommands"
 import { Controller } from ".."
 
 /**
@@ -70,7 +70,10 @@ export async function getAvailableSlashCommands(controller: Controller, _request
 		if (enabled) {
 			commands.push(
 				SlashCommandInfo.create({
-					name: workflow.name,
+					// The sanitized command name the materialized workflow is
+					// actually invoked by — the config name may contain
+					// characters (e.g. spaces) a slash token can't carry.
+					name: remoteWorkflowCommandName(workflow.name),
 					description: `Remote workflow: ${workflow.name}`,
 					section: "custom",
 					cliCompatible: true,

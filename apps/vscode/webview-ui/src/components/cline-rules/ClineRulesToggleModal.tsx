@@ -35,6 +35,7 @@ const ClineRulesToggleModal: React.FC = () => {
 		localAgentsRulesToggles = {},
 		localWorkflowToggles = {},
 		globalWorkflowToggles = {},
+		remoteWorkflowToggles = {},
 		hooksEnabled,
 		setGlobalClineRulesToggles,
 		setLocalClineRulesToggles,
@@ -46,6 +47,7 @@ const ClineRulesToggleModal: React.FC = () => {
 		setGlobalSkillsToggles,
 		setLocalSkillsToggles,
 		setRemoteRulesToggles,
+		setRemoteWorkflowToggles,
 	} = useExtensionState()
 	const [globalHooks, setGlobalHooks] = useState<Array<{ name: string; enabled: boolean; absolutePath: string }>>([])
 	const [workspaceHooks, setWorkspaceHooks] = useState<
@@ -322,6 +324,26 @@ const ClineRulesToggleModal: React.FC = () => {
 			})
 			.catch((err: Error) => {
 				console.error("Failed to toggle workflow:", err)
+			})
+	}
+
+	// Enterprise (remote) workflows persist through the same RPC with REMOTE
+	// scope, keyed by the remote workflow name rather than a file path.
+	const toggleRemoteWorkflow = (workflowName: string, enabled: boolean) => {
+		FileServiceClient.toggleWorkflow(
+			ToggleWorkflowRequest.create({
+				workflowPath: workflowName,
+				enabled,
+				scope: RuleScope.REMOTE,
+			}),
+		)
+			.then((response) => {
+				if (response.toggles) {
+					setRemoteWorkflowToggles(response.toggles)
+				}
+			})
+			.catch((err: Error) => {
+				console.error("Failed to toggle remote workflow:", err)
 			})
 	}
 
@@ -607,7 +629,8 @@ const ClineRulesToggleModal: React.FC = () => {
 											{remoteWorkflows
 												.sort((a, b) => a.name.localeCompare(b.name))
 												.map((workflow) => {
-													const enabled = workflow.locked || workflow.enabled
+													const enabled =
+														workflow.locked || remoteWorkflowToggles[workflow.name] !== false
 													return (
 														<RuleRow
 															alwaysEnabled={workflow.locked}
@@ -617,7 +640,7 @@ const ClineRulesToggleModal: React.FC = () => {
 															key={workflow.name}
 															rulePath={workflow.name}
 															ruleType="workflow"
-															toggleRule={workflow.toggle}
+															toggleRule={toggleRemoteWorkflow}
 														/>
 													)
 												})}

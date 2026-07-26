@@ -5,6 +5,25 @@ export interface SlashCommand {
 	cliCompatible?: boolean
 }
 
+/**
+ * The slash-command name a remote (enterprise) workflow is invoked by.
+ *
+ * Remote workflows materialize to files named via @cline/shared's
+ * `sanitizeSegment` (lower-cased, disallowed character runs collapsed to `-`),
+ * and the discovered runtime command is named after that sanitized basename.
+ * The remote config name itself (e.g. "Org Standards") may contain characters
+ * a slash-command token can't carry, so menus insert — and send-time expansion
+ * matches — this sanitized form (e.g. `/org-standards`).
+ */
+export function remoteWorkflowCommandName(value: string): string {
+	const stripped = value
+		.trim()
+		.toLowerCase()
+		.replace(/\.(md|markdown|txt)$/i, "")
+	const sanitized = stripped.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "")
+	return sanitized || stripped
+}
+
 export const BASE_SLASH_COMMANDS: SlashCommand[] = [
 	{
 		name: "newtask",

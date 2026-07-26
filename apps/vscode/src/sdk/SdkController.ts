@@ -10,6 +10,7 @@ import {
 	createUserInstructionConfigService,
 	getProviderAuthStorageId,
 	type PreparedRemoteConfigCoreIntegration,
+	parseWorkflowConfigFromMarkdown,
 	resolveDefaultMcpSettingsPath,
 	type SessionHistoryRecord,
 	setTelemetryOptOutGlobally,
@@ -91,7 +92,7 @@ import {
 	isSyntheticSdkUserMessage,
 	type SdkUserMessage,
 } from "./sdk-user-message-mapping"
-import { buildDisabledWorkflowNames, expandSlashCommands } from "./slash-command-expansion"
+import { buildWorkflowToggleState, expandSlashCommands } from "./slash-command-expansion"
 import { StatePostDebouncer } from "./state-post-debouncer"
 import { createTaskProxy, type TaskProxy } from "./task-proxy"
 import { syncTelemetrySettingFromSharedGlobalSettings } from "./telemetry-settings-sync"
@@ -830,18 +831,43 @@ export class Controller {
 			const workflowRecords = service
 				.listRecords("workflow")
 				.map((record) => ({ name: record.item.name, filePath: record.filePath }))
-			const disabledWorkflowNames = buildDisabledWorkflowNames({
+			const { disabledWorkflowNames, overrideFilePaths } = buildWorkflowToggleState({
 				records: workflowRecords,
 				globalToggles: this.stateManager.getGlobalSettingsKey("globalWorkflowToggles"),
 				workspaceToggles: this.stateManager.getWorkspaceStateKey("workflowToggles"),
 				remoteToggles: this.stateManager.getGlobalStateKey("remoteWorkflowToggles"),
 				remoteAlwaysEnabledNames: remoteWorkflows.filter((workflow) => workflow.alwaysEnabled).map((w) => w.name),
 			})
-			return expandSlashCommands(text, service.listRuntimeCommands(), { disabledWorkflowNames, workflowRecords })
+			const workflowInstructionOverrides = await this.loadWorkflowInstructionOverrides(overrideFilePaths)
+			return expandSlashCommands(text, service.listRuntimeCommands(), {
+				disabledWorkflowNames,
+				workflowRecords,
+				workflowInstructionOverrides,
+			})
 		} catch (error) {
 			Logger.warn("[SdkController] Slash command resolution failed, using raw text:", error)
 			return text
 		}
+	}
+
+	/**
+	 * Read the instruction bodies of workflow files that should expand instead
+	 * of the same-named record that won SDK discovery (an enabled file in a
+	 * legacy-preferred scope — see buildWorkflowToggleState). Files that fail
+	 * to read or parse are skipped, so the record's own body expands.
+	 */
+	private async loadWorkflowInstructionOverrides(overrideFilePaths: ReadonlyMap<string, string>): Promise<Map<string, string>> {
+		const overrides = new Map<string, string>()
+		for (const [commandName, filePath] of overrideFilePaths) {
+			try {
+				const content = await fs.readFile(filePath, "utf8")
+				const parsed = parseWorkflowConfigFromMarkdown(content, path.basename(filePath, path.extname(filePath)))
+				overrides.set(commandName, parsed.instructions)
+			} catch (error) {
+				Logger.warn(`[SdkController] Failed to read workflow override ${filePath}:`, error)
+			}
+		}
+		return overrides
 	}
 
 	/**
