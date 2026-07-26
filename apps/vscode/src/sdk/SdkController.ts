@@ -91,7 +91,7 @@ import {
 	isSyntheticSdkUserMessage,
 	type SdkUserMessage,
 } from "./sdk-user-message-mapping"
-import { buildDisabledWorkflowNames, expandSlashCommands } from "./slash-command-expansion"
+import { buildWorkflowToggleState, expandSlashCommands } from "./slash-command-expansion"
 import { StatePostDebouncer } from "./state-post-debouncer"
 import { createTaskProxy, type TaskProxy } from "./task-proxy"
 import { syncTelemetrySettingFromSharedGlobalSettings } from "./telemetry-settings-sync"
@@ -827,13 +827,24 @@ export class Controller {
 			const workspaceRoot = await this.getWorkspaceRoot()
 			const service = await this.ensureUserInstructionService(workspaceRoot)
 			const remoteWorkflows = this.stateManager.getRemoteConfigSettings()?.remoteGlobalWorkflows ?? []
-			const disabledWorkflowNames = buildDisabledWorkflowNames({
+			const workflowToggleState = buildWorkflowToggleState({
 				globalToggles: this.stateManager.getGlobalSettingsKey("globalWorkflowToggles"),
 				workspaceToggles: this.stateManager.getWorkspaceStateKey("workflowToggles"),
 				remoteToggles: this.stateManager.getGlobalStateKey("remoteWorkflowToggles"),
 				remoteAlwaysEnabledNames: remoteWorkflows.filter((workflow) => workflow.alwaysEnabled).map((w) => w.name),
 			})
-			return expandSlashCommands(text, service.listRuntimeCommands(), disabledWorkflowNames)
+			// Workflow toggles are keyed by file path, so attach each workflow
+			// command's backing file: expansion needs it to honor the toggles
+			// when a file's frontmatter `name` differs from its file name, and
+			// to detect when the watcher kept a different same-named file than
+			// the one the user's toggles (and the slash menu) prefer.
+			const workflowFilePathsById = new Map(service.listRecords("workflow").map((record) => [record.id, record.filePath]))
+			const commands = service
+				.listRuntimeCommands()
+				.map((command) =>
+					command.kind === "workflow" ? { ...command, filePath: workflowFilePathsById.get(command.id) } : command,
+				)
+			return await expandSlashCommands(text, commands, workflowToggleState)
 		} catch (error) {
 			Logger.warn("[SdkController] Slash command resolution failed, using raw text:", error)
 			return text
