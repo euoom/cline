@@ -289,6 +289,31 @@ describe("SdkCompactionCoordinator", () => {
 		expect(options.sessions.endActiveSession).not.toHaveBeenCalled()
 		expect(resumedHost.stop).toHaveBeenCalledWith("history-task")
 		expect(resumedHost.dispose).toHaveBeenCalledWith("compactDisplayedTask")
+		expect(options.messages.appendAndEmit).toHaveBeenCalledWith(
+			[expect.objectContaining({ say: "info", text: "Couldn't compact the conversation. Please try again." })],
+			expect.objectContaining({ payload: expect.objectContaining({ sessionId: "replacement-task" }) }),
+		)
+	})
+
+	it("surfaces a failure info when the displayed task changes after resume start", async () => {
+		const { coordinator, options, resumedHost } = makeCoordinator({
+			activeSession: undefined,
+			displayedTaskId: "history-task",
+		})
+		resumedHost.start.mockImplementationOnce(async () => {
+			options.getDisplayedTaskId.mockReturnValue("other-task")
+			return { sessionId: "history-task" }
+		})
+
+		await coordinator.compactTask()
+
+		expect(mockCreateContextCompactionPrepareTurn).not.toHaveBeenCalled()
+		expect(resumedHost.stop).toHaveBeenCalledWith("history-task")
+		expect(resumedHost.dispose).toHaveBeenCalledWith("compactDisplayedTask")
+		expect(options.messages.appendAndEmit).toHaveBeenCalledWith(
+			[expect.objectContaining({ say: "info", text: "Couldn't compact the conversation. Please try again." })],
+			expect.objectContaining({ payload: expect.objectContaining({ sessionId: "other-task" }) }),
+		)
 	})
 })
 
@@ -361,6 +386,7 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 		}
 		rebuilds: { runExclusive: ReturnType<typeof vi.fn> }
 		messages: { appendAndEmit: ReturnType<typeof vi.fn> }
+		getDisplayedTaskId: ReturnType<typeof vi.fn>
 	}
 
 	return {

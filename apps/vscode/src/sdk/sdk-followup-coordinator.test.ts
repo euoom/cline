@@ -273,6 +273,7 @@ describe("SdkFollowupCoordinator", () => {
 
 		await coordinator.askResponse("continue")
 
+		expect(options.runExclusive).toHaveBeenCalledOnce()
 		expect(options.sessionConfigBuilder.build).toHaveBeenCalledWith({ cwd: "/task-cwd", mode: "act" })
 		expect(options.createTempSessionHost).toHaveBeenCalledOnce()
 		expect(options.loadInitialMessages).toHaveBeenCalledWith(
@@ -450,6 +451,7 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 		resetMessageTranslator: vi.fn(),
 		postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		waitForPendingRebuilds: input.waitForPendingRebuilds ?? vi.fn().mockResolvedValue(undefined),
+		runExclusive: input.runExclusive ?? vi.fn(async (operation: () => Promise<unknown>) => operation()),
 		onResumeFailed: vi.fn(),
 	} as unknown as SdkFollowupCoordinatorOptions & {
 		interactions: SdkFollowupCoordinatorOptions["interactions"] & {
@@ -483,6 +485,7 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 		emitClineAuthError: ReturnType<typeof vi.fn>
 		resetMessageTranslator: ReturnType<typeof vi.fn>
 		postStateToWebview: ReturnType<typeof vi.fn>
+		runExclusive: ReturnType<typeof vi.fn>
 		onResumeFailed: ReturnType<typeof vi.fn>
 	}
 
@@ -508,6 +511,7 @@ interface MakeCoordinatorInput {
 	mode: "act" | "plan"
 	isLegacyTask: boolean
 	waitForPendingRebuilds: () => Promise<void>
+	runExclusive: <T>(operation: () => Promise<T>) => Promise<T>
 }
 
 function makeActiveSession(input: { isRunning?: boolean } = {}) {

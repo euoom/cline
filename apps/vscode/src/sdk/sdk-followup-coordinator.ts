@@ -37,6 +37,12 @@ export interface SdkFollowupCoordinatorOptions {
 	/** Resolves once no session rebuild is in flight. */
 	waitForPendingRebuilds: () => Promise<void>
 	/**
+	 * Serializes with session rebuilds and displayed-task compaction. Resume must
+	 * hold this around prepare/start so those paths cannot interleave on the same
+	 * sessionId after waitForPendingRebuilds has already returned.
+	 */
+	runExclusive: <T>(operation: () => Promise<T>) => Promise<T>
+	/**
 	 * Called when resuming a task fails. askResponse moved the turn phase to
 	 * streaming before delegating here, so the failure must move it to a
 	 * terminal phase or the footer stays stuck on Thinking/Cancel.
@@ -139,50 +145,55 @@ export class SdkFollowupCoordinator {
 	}
 
 	private async resumeSessionFromTask(taskId: string, prompt?: string, images?: string[], files?: string[]): Promise<void> {
-		Logger.log(`[SdkController] Resuming session from task: ${taskId}`)
+		// Hold the rebuild mutex for prepare+start. waitForPendingRebuilds only
+		// waits until the mutex is free; without holding it here, displayed-task
+		// compaction can prepare/start the same sessionId in parallel.
+		await this.options.runExclusive(async () => {
+			Logger.log(`[SdkController] Resuming session from task: ${taskId}`)
 
-		const historyItem = await this.options.taskHistory.findHistoryItem(taskId)
-		const resumeStart = await prepareTaskResumeStartInput(this.options, taskId)
+			const historyItem = await this.options.taskHistory.findHistoryItem(taskId)
+			const resumeStart = await prepareTaskResumeStartInput(this.options, taskId)
 
-		Logger.log(`[SdkController] Resuming with ${resumeStart.initialMessages?.length ?? 0} initial messages`)
+			Logger.log(`[SdkController] Resuming with ${resumeStart.initialMessages?.length ?? 0} initial messages`)
 
-		const { startResult, sdkHost } = await this.options.sessions.startNewSession({
-			...resumeStart,
-			interactive: true,
+			const { startResult, sdkHost } = await this.options.sessions.startNewSession({
+				...resumeStart,
+				interactive: true,
+			})
+
+			const task = this.options.getTask()
+			if (task && task.taskId !== startResult.sessionId) {
+				task.taskId = startResult.sessionId
+			}
+
+			this.options.resetMessageTranslator()
+
+			if (historyItem) {
+				historyItem.ts = Date.now()
+				historyItem.modelId = resumeStart.config.modelId
+				await this.options.taskHistory.updateTaskHistoryItem(historyItem)
+			}
+
+			// Echo whenever the user supplied content, including attachment-only
+			// resumes, and include the attachments in the bubble. This also keeps the
+			// visible transcript aligned with SDK history for edit/regenerate ordinal
+			// mapping: a resumption prompt carrying user attachments is counted as a
+			// visible user message, a bare resumption prompt is not.
+			if (prompt?.trim() || images?.length || files?.length) {
+				this.emitUserFeedback(startResult.sessionId, prompt, images, files)
+			}
+
+			await this.options.postStateToWebview()
+
+			const effectivePrompt =
+				prompt?.trim() ||
+				(historyItem
+					? `[TASK RESUMPTION] This task was interrupted. It may or may not be complete, so please reassess the task context. The conversation history has been preserved. New instructions from the user: ${historyItem.task}`
+					: "[TASK RESUMPTION] Please continue where you left off.")
+
+			const resolvedPrompt = await this.options.resolveContextMentions(effectivePrompt)
+			this.options.sessions.fireAndForgetSend(sdkHost, startResult.sessionId, resolvedPrompt, images, files)
 		})
-
-		const task = this.options.getTask()
-		if (task && task.taskId !== startResult.sessionId) {
-			task.taskId = startResult.sessionId
-		}
-
-		this.options.resetMessageTranslator()
-
-		if (historyItem) {
-			historyItem.ts = Date.now()
-			historyItem.modelId = resumeStart.config.modelId
-			await this.options.taskHistory.updateTaskHistoryItem(historyItem)
-		}
-
-		// Echo whenever the user supplied content, including attachment-only
-		// resumes, and include the attachments in the bubble. This also keeps the
-		// visible transcript aligned with SDK history for edit/regenerate ordinal
-		// mapping: a resumption prompt carrying user attachments is counted as a
-		// visible user message, a bare resumption prompt is not.
-		if (prompt?.trim() || images?.length || files?.length) {
-			this.emitUserFeedback(startResult.sessionId, prompt, images, files)
-		}
-
-		await this.options.postStateToWebview()
-
-		const effectivePrompt =
-			prompt?.trim() ||
-			(historyItem
-				? `[TASK RESUMPTION] This task was interrupted. It may or may not be complete, so please reassess the task context. The conversation history has been preserved. New instructions from the user: ${historyItem.task}`
-				: "[TASK RESUMPTION] Please continue where you left off.")
-
-		const resolvedPrompt = await this.options.resolveContextMentions(effectivePrompt)
-		this.options.sessions.fireAndForgetSend(sdkHost, startResult.sessionId, resolvedPrompt, images, files)
 	}
 
 	private emitUserFeedback(sessionId: string, prompt?: string, images?: string[], files?: string[]): void {

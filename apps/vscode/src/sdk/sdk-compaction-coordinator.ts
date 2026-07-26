@@ -17,7 +17,7 @@
 // path below. The coordinator owns this session's host, so another task can
 // replace the controller's active session without compaction stopping it during
 // cleanup. Resuming and compaction both run inside the session-rebuild mutex, so
-// a concurrent follow-up (which awaits that mutex before choosing a host)
+// a concurrent follow-up (which holds that mutex around prepare/start)
 // cannot interleave with the read/compact/persist sequence.
 //
 // Before this, the VSCode button sent the literal text "/compact" to the model,
@@ -122,7 +122,7 @@ export class SdkCompactionCoordinator {
 	 * Resume a displayed history task in an isolated host, compact it, then
 	 * dispose the owned host so the task stays "displayed only". Runs inside the
 	 * session-rebuild mutex so a concurrent follow-up cannot resume the same task
-	 * in parallel; the follow-up waits, then reads the sidecar this persisted.
+	 * in parallel; the follow-up holds the same mutex around its prepare/start.
 	 */
 	private async compactDisplayedTask(taskId: string): Promise<void> {
 		await this.options.rebuilds.runExclusive(async () => {
@@ -156,7 +156,9 @@ export class SdkCompactionCoordinator {
 				})
 				sessionId = startResult.sessionId
 				if (this.options.sessions.getActiveSession() || this.options.getDisplayedTaskId() !== taskId) {
-					return
+					// start may already have persisted/migrated session data; surface
+					// the abort the same way as the pre-start target-change guards.
+					throw new Error("Compaction target changed after the displayed task was resumed.")
 				}
 				await this.runCompaction(sdkHost, sessionId)
 			} finally {
@@ -278,10 +280,14 @@ export class SdkCompactionCoordinator {
 
 	private emitInfo(text: string, sessionId?: string): void {
 		const targetSessionId = this.getTargetSessionId()
-		if (sessionId && targetSessionId !== sessionId) {
-			Logger.warn(`[SdkController] compactTask: skipped info for inactive session ${sessionId}`)
-			return
+		// Info (especially failures) must remain visible if the user navigates
+		// away mid-compaction. Redirect onto whatever they are viewing now
+		// rather than dropping the outcome. Compaction divider rows stay strict
+		// about session identity in emitCompactionRow.
+		if (sessionId && targetSessionId && targetSessionId !== sessionId) {
+			Logger.warn(`[SdkController] compactTask: redirecting info for inactive session ${sessionId} to ${targetSessionId}`)
 		}
+		const emitSessionId = targetSessionId ?? sessionId ?? ""
 		const infoMessage: ClineMessage = {
 			ts: Date.now(),
 			type: "say",
@@ -291,7 +297,7 @@ export class SdkCompactionCoordinator {
 		}
 		this.options.messages.appendAndEmit([infoMessage], {
 			type: "status",
-			payload: { sessionId: sessionId ?? targetSessionId ?? "", status: "running" },
+			payload: { sessionId: emitSessionId, status: "running" },
 		})
 	}
 

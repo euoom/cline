@@ -512,6 +512,7 @@ export class Controller {
 				await this.mode.waitForPendingRebuild()
 				await this.sessionRebuilds.waitUntilSettled()
 			},
+			runExclusive: (operation) => this.sessionRebuilds.runExclusive(operation),
 			getTask: () => this.task,
 			createTempSessionHost: () => VscodeSessionHost.create({ mcpHub: this.mcpHub }),
 			getWorkspaceRoot: () => this.getWorkspaceRoot(),
