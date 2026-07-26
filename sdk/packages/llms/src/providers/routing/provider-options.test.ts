@@ -354,6 +354,82 @@ describe("composeAiSdkProviderOptions: Anthropic thinking precedence", () => {
 			],
 		},
 		{
+			name: "compact Opus 4.5 id -> manual thinking, no effort",
+			request: {
+				providerId: "anthropic",
+				modelId: "claude-opus4-5",
+				reasoning: { enabled: true, effort: "high" },
+			},
+			context: { family: "claude-opus" },
+			expect: [
+				{
+					bucket: "anthropic",
+					has: { thinking: MANUAL_THINKING },
+					lacks: ["effort"],
+				},
+			],
+		},
+		{
+			name: "compact Opus 4.6 id -> adaptive thinking with effort",
+			request: {
+				providerId: "anthropic",
+				modelId: "claude-opus4-6",
+				reasoning: { enabled: true, effort: "high" },
+			},
+			context: { family: "claude-opus" },
+			expect: [
+				{
+					bucket: "anthropic",
+					has: { thinking: ADAPTIVE_THINKING, effort: "high" },
+				},
+			],
+		},
+		{
+			name: "compact Opus 4.7 id -> adaptive thinking with effort",
+			request: {
+				providerId: "anthropic",
+				modelId: "claude-opus4-7",
+				reasoning: { enabled: true, effort: "high" },
+			},
+			context: { family: "claude-opus" },
+			expect: [
+				{
+					bucket: "anthropic",
+					has: { thinking: ADAPTIVE_THINKING, effort: "high" },
+				},
+			],
+		},
+		{
+			name: "dotted line-first Sonnet 4.6 id -> adaptive thinking with effort",
+			request: {
+				providerId: "anthropic",
+				modelId: "anthropic/claude-sonnet-4.6",
+				reasoning: { enabled: true, effort: "high" },
+			},
+			context: { family: "claude-sonnet" },
+			expect: [
+				{
+					bucket: "anthropic",
+					has: { thinking: ADAPTIVE_THINKING, effort: "high" },
+				},
+			],
+		},
+		{
+			name: "dotted line-first Opus 4.7 id -> adaptive thinking with effort",
+			request: {
+				providerId: "anthropic",
+				modelId: "anthropic/claude-opus-4.7",
+				reasoning: { enabled: true, effort: "high" },
+			},
+			context: { family: "claude-opus" },
+			expect: [
+				{
+					bucket: "anthropic",
+					has: { thinking: ADAPTIVE_THINKING, effort: "high" },
+				},
+			],
+		},
+		{
 			name: "Sonnet 4.6 -> adaptive thinking with effort",
 			request: {
 				providerId: "anthropic",
@@ -376,6 +452,36 @@ describe("composeAiSdkProviderOptions: Anthropic thinking precedence", () => {
 				reasoning: { enabled: true, effort: "high" },
 			},
 			context: { family: "claude-sonnet" },
+			expect: [
+				{
+					bucket: "anthropic",
+					has: { thinking: ADAPTIVE_THINKING, effort: "high" },
+				},
+			],
+		},
+		{
+			name: "major-only Claude version (Opus 5) -> adaptive thinking",
+			request: {
+				providerId: "anthropic",
+				modelId: "claude-opus-5",
+				reasoning: { enabled: true, effort: "high" },
+			},
+			context: { family: "claude-opus" },
+			expect: [
+				{
+					bucket: "anthropic",
+					has: { thinking: ADAPTIVE_THINKING, effort: "high" },
+				},
+			],
+		},
+		{
+			name: "Claude Fable 5 -> adaptive thinking",
+			request: {
+				providerId: "anthropic",
+				modelId: "claude-fable-5",
+				reasoning: { enabled: true, effort: "high" },
+			},
+			context: { family: "claude-fable" },
 			expect: [
 				{
 					bucket: "anthropic",

@@ -363,20 +363,31 @@ function resolveClaudeLine(
 
 function resolveClaudeVersion(modelId: string | undefined) {
 	const normalized = modelId?.toLowerCase() ?? "";
-	const versionFirstMatch =
-		/claude-(\d+)[.-](\d{1,2})-(?:opus|sonnet|haiku)/i.exec(normalized);
-	const lineFirstMatch = /claude-(?:opus|sonnet|haiku)-(.+)/i.exec(normalized);
-	const tokens = lineFirstMatch?.[1]?.match(/\d+/g) ?? [];
-	const majorToken = versionFirstMatch?.[1] ?? tokens[0];
+	const versionFirstMatch = /claude-(\d+)[.-](\d{1,2})-[a-z][a-z0-9]*/i.exec(
+		normalized,
+	);
+	const compactLineFirstMatch =
+		/claude-(?:opus|sonnet|haiku|fable|mythos)(\d+)-(\d{1,2})(?:\D|$)/i.exec(
+			normalized,
+		);
+	const lineFirstMatch =
+		/claude-(?:opus|sonnet|haiku|fable|mythos)-(\d+)(?:[.-](\d{1,2})(?:\D|$))?/i.exec(
+			normalized,
+		);
+	const majorToken =
+		versionFirstMatch?.[1] ?? compactLineFirstMatch?.[1] ?? lineFirstMatch?.[1];
 	const minorToken =
-		versionFirstMatch?.[2] ?? (tokens[1]?.length <= 2 ? tokens[1] : undefined);
-	if (!majorToken || !minorToken) {
+		versionFirstMatch?.[2] ?? compactLineFirstMatch?.[2] ?? lineFirstMatch?.[2];
+	if (!majorToken) {
 		return undefined;
 	}
 
 	const major = Number.parseInt(majorToken, 10);
-	const minor = Number.parseInt(minorToken, 10);
-	if (!Number.isFinite(major) || !Number.isFinite(minor)) {
+	const minor = minorToken ? Number.parseInt(minorToken, 10) : undefined;
+	if (
+		!Number.isFinite(major) ||
+		(minor !== undefined && !Number.isFinite(minor))
+	) {
 		return undefined;
 	}
 	return { major, minor };
@@ -386,9 +397,8 @@ function supportsAnthropicAdaptiveThinkingPolicy(options: {
 	modelId?: string;
 	family?: string;
 }): boolean {
-	const line = resolveClaudeLine(options.modelId, options.family);
 	const version = resolveClaudeVersion(options.modelId);
-	if (!line || !version) {
+	if (!version) {
 		return false;
 	}
 
@@ -397,7 +407,12 @@ function supportsAnthropicAdaptiveThinkingPolicy(options: {
 		return version.major > 4;
 	}
 
-	return (line === "opus" || line === "sonnet") && version.minor >= 6;
+	const line = resolveClaudeLine(options.modelId, options.family);
+	return (
+		(line === "opus" || line === "sonnet") &&
+		version.minor !== undefined &&
+		version.minor >= 6
+	);
 }
 
 export function resolveAnthropicReasoningRequestPolicy(
@@ -519,6 +534,12 @@ export function buildAnthropicCompatibleReasoningOptions(
 	context: GatewayProviderContext,
 ) {
 	const policy = resolveAnthropicReasoningRequestPolicy(request, context);
+	if (
+		request.reasoning?.enabled === false &&
+		request.modelId.toLowerCase().includes("claude-fable")
+	) {
+		return { max_tokens: ANTHROPIC_DEFAULT_THINKING_BUDGET_TOKENS };
+	}
 	if (
 		policy.kind === "none" ||
 		(!request.reasoning?.enabled &&
