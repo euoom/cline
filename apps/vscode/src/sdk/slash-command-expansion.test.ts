@@ -56,6 +56,13 @@ describe("expandSlashCommands", () => {
 		expect(expandSlashCommands("no commands here", commands)).toBe("no commands here")
 	})
 
+	it("expands the typed filename when frontmatter renames the command", () => {
+		const renamed = [workflow("ship-it", "Ship the release.")]
+		const records = [{ name: "ship-it", filePath: "/repo/.clinerules/workflows/release.md" }]
+		expect(expandSlashCommands("/release.md now", renamed, new Set(), records)).toBe("Ship the release. now")
+		expect(expandSlashCommands("/release now", renamed, new Set(), records)).toBe("Ship the release. now")
+	})
+
 	it("skips workflows the user disabled via toggles", () => {
 		const disabled = new Set(["release"])
 		expect(expandSlashCommands("/release", commands, disabled)).toBe("/release")
@@ -128,6 +135,25 @@ describe("buildDisabledWorkflowNames", () => {
 			remoteToggles: { "org-standards": false, "org-review": true },
 		})
 		expect(disabled).toEqual(new Set(["org-standards"]))
+	})
+
+	it("matches remote toggles keyed by the raw config name to the sanitized record", () => {
+		// Remote config names are sanitized when materialized ("Org Standards"
+		// → org-standards.md), while toggles stay keyed by the raw name.
+		const disabled = buildDisabledWorkflowNames({
+			records: [{ name: "org-standards", filePath: "/repo/.cline/remote-config/workflows/org-standards.md" }],
+			remoteToggles: { "Org Standards": false },
+		})
+		expect(disabled).toEqual(new Set(["org-standards"]))
+	})
+
+	it("honors alwaysEnabled locks keyed by the raw remote config name", () => {
+		const disabled = buildDisabledWorkflowNames({
+			records: [{ name: "org-standards", filePath: "/repo/.cline/remote-config/workflows/org-standards.md" }],
+			remoteToggles: { "Org Standards": false },
+			remoteAlwaysEnabledNames: ["Org Standards"],
+		})
+		expect(disabled).toEqual(new Set())
 	})
 
 	it("treats locked (alwaysEnabled) remote workflows as enabled despite stale toggles", () => {
