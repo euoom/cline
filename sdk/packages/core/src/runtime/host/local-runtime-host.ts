@@ -551,10 +551,21 @@ export class LocalRuntimeHost implements RuntimeHost {
 			writeSessionMetadata: (updater) =>
 				this.persistSessionMetadata(sessionId, updater),
 		});
+		// When re-opening an existing session (resume/continuation), a caller-
+		// provided sessionMetadata is an overlay on the persisted metadata, not
+		// a replacement. Hosts routinely pass display metadata (title, model,
+		// cost figures) on resume; if it replaced the persisted record, the
+		// in-memory session (which getSession() serves to callers while the
+		// session is active) would silently lose accumulated keys - most
+		// critically `checkpoint`, whose history has no other source to be
+		// recomputed from - and the next merge-style write (e.g. the host's
+		// task-history sync) would persist that loss.
+		const persistedBaseMetadata =
+			resumedArtifacts?.manifest.metadata ?? existingMetadataOnContinuation;
 		const initialSessionMetadata = withSessionGitMetadata(
-			startInput.sessionMetadata ??
-				resumedArtifacts?.manifest.metadata ??
-				existingMetadataOnContinuation,
+			startInput.sessionMetadata && persistedBaseMetadata
+				? { ...persistedBaseMetadata, ...startInput.sessionMetadata }
+				: (startInput.sessionMetadata ?? persistedBaseMetadata),
 			bootstrap.gitState,
 		);
 		if (!resumedArtifacts) manifest.metadata = initialSessionMetadata;

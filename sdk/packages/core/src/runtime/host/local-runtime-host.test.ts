@@ -3702,6 +3702,83 @@ describe("LocalRuntimeHost", () => {
 		});
 	});
 
+	it("overlays caller sessionMetadata on persisted metadata when resuming, preserving checkpoint history", async () => {
+		const sessionId = "sess-resume-metadata-overlay";
+		const sessionsDir = join(isolatedHomeDir, "sessions");
+		const sessionDir = join(sessionsDir, sessionId);
+		mkdirSync(sessionDir, { recursive: true });
+		const checkpoint = {
+			latest: { ref: "abc123", createdAt: 1, runCount: 1 },
+			history: [{ ref: "abc123", createdAt: 1, runCount: 1 }],
+		};
+		const manifest = {
+			...createManifest(sessionId),
+			status: "completed" as const,
+			ended_at: "2026-01-01T00:03:00.000Z",
+			metadata: {
+				title: "saved title",
+				checkpoint,
+			},
+		};
+		const sessionService = {
+			ensureSessionsDir: vi.fn().mockReturnValue(sessionsDir),
+			readSessionManifest: vi.fn().mockReturnValue(manifest),
+			createRootSessionWithArtifacts: vi.fn(),
+			persistSessionMessages: vi.fn(),
+			updateSessionStatus: vi
+				.fn()
+				.mockResolvedValue({ updated: true, endedAt: undefined }),
+			updateSession: vi.fn().mockResolvedValue({ updated: true }),
+			writeSessionManifest: vi.fn(),
+			listSessions: vi.fn().mockResolvedValue([]),
+			deleteSession: vi.fn().mockResolvedValue({ deleted: true }),
+		};
+		const runtimeBuilder = {
+			build: vi.fn().mockReturnValue({
+				tools: [],
+				registerLeadAgent: vi.fn(),
+				shutdown: vi.fn(),
+			}),
+		};
+		const manager = new RuntimeHostUnderTest({
+			distinctId,
+			sessionService: sessionService as never,
+			runtimeBuilder,
+			createAgent: () =>
+				({
+					run: vi.fn(),
+					continue: vi.fn(),
+					abort: vi.fn(),
+					subscribeEvents: vi.fn().mockReturnValue(() => {}),
+					canStartRun: vi.fn().mockReturnValue(true),
+					getAgentId: vi.fn().mockReturnValue("agent-root-1"),
+					getConversationId: vi.fn().mockReturnValue("conv-root-1"),
+					shutdown: vi.fn().mockResolvedValue(undefined),
+					getMessages: vi.fn().mockReturnValue([]),
+					messages: [],
+				}) as never,
+		});
+
+		// A host resume passes refreshed display metadata (title, model, cost
+		// figures) but does not know about accumulated keys like `checkpoint`.
+		await manager.startSession({
+			config: createConfig({ sessionId }),
+			interactive: true,
+			initialMessages: [{ role: "user", content: "first prompt" }],
+			sessionMetadata: { title: "refreshed title", modelId: "model-2" },
+		});
+
+		// getSession serves the in-memory session while it is active. If the
+		// overlay replaced the persisted metadata instead of merging, a host's
+		// read-merge-write history sync would persist the checkpoint loss.
+		const record = await manager.getSession(sessionId);
+		expect(record?.metadata).toMatchObject({
+			title: "refreshed title",
+			modelId: "model-2",
+			checkpoint,
+		});
+	});
+
 	it("restores full persisted aggregate usage when child message artifacts are missing", async () => {
 		const sessionId = "sess-resume-aggregate-metadata";
 		const sessionsDir = join(isolatedHomeDir, "sessions");
