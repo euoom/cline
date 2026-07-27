@@ -91,8 +91,12 @@ export class SdkCompactionCoordinator {
 				// cannot grow the transcript between this read/compact/persist
 				// sequence and its persistence.
 				await this.options.rebuilds.runExclusive(async () => {
+					// Compare by sessionId, not object identity: a scheduled rebuild
+					// (provider/MCP/terminal mode) drained by this mutex replaces the
+					// ActiveSession object while reusing the same sessionId, and the
+					// replacement is still the task the user asked to compact.
 					const current = this.options.sessions.getActiveSession()
-					if (current !== activeSession) {
+					if (!current || current.sessionId !== activeSession.sessionId) {
 						Logger.log("[SdkController] compactTask: Active session changed while waiting for the mutex; cancelling")
 						return
 					}
