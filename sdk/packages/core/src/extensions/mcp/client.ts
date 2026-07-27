@@ -45,8 +45,8 @@ const MCP_PROTOCOL_VERSION = "2024-11-05";
 // only bounds how long we wait for a legacy server that is silent on the
 // encoding it does not speak. A configured `timeout` raises it, which is
 // what lets slow-starting servers (e.g. uvx downloading on first run) get
-// through initialize.
-const MCP_CONNECT_PROBE_TIMEOUT_MS = 1_500;
+// through initialize. Exported so UIs can report the real connect budget.
+export const MCP_CONNECT_PROBE_TIMEOUT_MS = 1_500;
 const DEFAULT_HTTP_MCP_REDIRECT_URL =
 	"http://127.0.0.1:1456/mcp/oauth/callback";
 

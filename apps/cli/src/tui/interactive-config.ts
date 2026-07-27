@@ -14,6 +14,7 @@ import {
 	hasMcpSettingsFile,
 	listHookConfigFiles,
 	listPluginToolsWithDiagnostics,
+	MCP_CONNECT_PROBE_TIMEOUT_MS,
 	type McpServerRegistration,
 	type PluginInitializationFailure,
 	type RuleConfig,
@@ -27,7 +28,7 @@ import {
 	type UserInstructionConfigService,
 	type WorkflowConfig,
 } from "@cline/core";
-import { DEFAULT_MCP_TIMEOUT_SECONDS } from "@cline/shared";
+import { resolveMcpTimeoutSeconds } from "@cline/shared";
 import { readFileSyncStrippingUtf8Bom } from "@cline/shared/node";
 import { getToolCatalog } from "../runtime/tools";
 import {
@@ -176,9 +177,17 @@ function getMcpAuthLabel(registration: McpServerRegistration): string {
 }
 
 function getMcpDescription(registration: McpServerRegistration): string {
-	const timeoutSeconds =
-		registration.timeoutSeconds ?? DEFAULT_MCP_TIMEOUT_SECONDS;
-	return `${registration.transport.type}, ${getMcpAuthLabel(registration)}, timeout ${timeoutSeconds}s`;
+	const base = `${registration.transport.type}, ${getMcpAuthLabel(registration)}`;
+	const timeoutSeconds = resolveMcpTimeoutSeconds(registration.timeoutSeconds);
+	// Without an explicit `timeout`, stdio servers keep the fast initialize
+	// probe, so a bare default would overstate the connect budget.
+	if (
+		registration.timeoutSeconds === undefined &&
+		registration.transport.type === "stdio"
+	) {
+		return `${base}, timeout ${timeoutSeconds}s (connect probe ${MCP_CONNECT_PROBE_TIMEOUT_MS / 1000}s)`;
+	}
+	return `${base}, timeout ${timeoutSeconds}s`;
 }
 
 function loadAgentConfigItems(workspaceRoot: string): InteractiveConfigItem[] {

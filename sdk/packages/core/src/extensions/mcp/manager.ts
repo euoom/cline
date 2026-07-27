@@ -60,13 +60,16 @@ export class InMemoryMcpManager implements McpManager {
 				return;
 			}
 
-			const didTransportChange =
+			// Clients snapshot their timeout at construction, so a timeout
+			// change must rebuild the client just like a transport change.
+			const didClientConfigChange =
 				JSON.stringify(existing.registration.transport) !==
-				JSON.stringify(registration.transport);
+					JSON.stringify(registration.transport) ||
+				existing.registration.timeoutSeconds !== registration.timeoutSeconds;
 			existing.registration = { ...registration };
 			existing.updatedAt = nowMs();
 
-			if (didTransportChange) {
+			if (didClientConfigChange) {
 				await this.disconnectState(existing);
 				existing.client = undefined;
 				existing.toolCache = undefined;

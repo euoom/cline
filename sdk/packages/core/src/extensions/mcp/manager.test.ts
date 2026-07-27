@@ -103,6 +103,37 @@ describe("InMemoryMcpManager", () => {
 		).rejects.toThrow(/disabled/i);
 	});
 
+	it("rebuilds the client when a re-registration changes the timeout", async () => {
+		const firstClient = createClient();
+		const secondClient = createClient();
+		const clients = [firstClient, secondClient];
+		const clientFactory = vi.fn(async () => {
+			const client = clients.shift();
+			if (!client) {
+				throw new Error("unexpected extra client request");
+			}
+			return client;
+		});
+		const manager = new InMemoryMcpManager({ clientFactory });
+		const registration = {
+			name: "slow",
+			transport: { type: "stdio" as const, command: "node" },
+		};
+
+		await manager.registerServer(registration);
+		await manager.connectServer("slow");
+		expect(clientFactory).toHaveBeenCalledTimes(1);
+
+		await manager.registerServer({ ...registration, timeoutSeconds: 120 });
+		expect(firstClient.disconnect).toHaveBeenCalledTimes(1);
+
+		await manager.connectServer("slow");
+		expect(clientFactory).toHaveBeenCalledTimes(2);
+		expect(clientFactory).toHaveBeenLastCalledWith(
+			expect.objectContaining({ timeoutSeconds: 120 }),
+		);
+	});
+
 	it("retains and disconnects a client whose initialization fails", async () => {
 		const connectError = new Error("initialize failed");
 		const client = createClient({

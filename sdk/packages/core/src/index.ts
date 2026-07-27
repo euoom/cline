@@ -292,6 +292,7 @@ export {
 	type LoadMcpSettingsOptions,
 	listMcpServerOAuthStatuses,
 	loadMcpSettingsFile,
+	MCP_CONNECT_PROBE_TIMEOUT_MS,
 	type McpConnectionStatus,
 	type McpManager,
 	type McpManagerOptions,

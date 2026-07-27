@@ -32,3 +32,19 @@ export function resolveMcpTimeoutSeconds(value: unknown): number {
 	}
 	return clampMcpTimeoutSeconds(value);
 }
+
+/**
+ * User-facing message for an MCP request timeout. Shared so every client
+ * (SDK, VSCode extension, OAuth flows) names the same bound and remedy.
+ * Each client wraps this in its own McpError: the MCP SDK is installed
+ * per-package, so error classes cannot cross package boundaries.
+ */
+export function formatMcpTimeoutErrorMessage(
+	serverName: string,
+	timeoutMs: number,
+): string {
+	return (
+		`MCP request to "${serverName}" timed out after ${Math.round(timeoutMs / 1000)}s. ` +
+		`Increase the "timeout" field (in seconds) for this server in cline_mcp_settings.json.`
+	);
+}
