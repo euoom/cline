@@ -1,9 +1,11 @@
-import { normalizeUserInput, stripModeNotices } from "@cline/shared"
-import { ACT_MODE_CONTINUATION_PROMPT } from "./sdk-mode-coordinator"
+import { isGenuineUserPromptMessage } from "@cline/core"
+import type * as LlmsProviders from "@cline/llms"
+import { isSyntheticContinuationPromptText } from "@cline/shared"
 
 export type SdkUserMessage = {
 	role?: unknown
 	content?: unknown
+	metadata?: unknown
 }
 
 export function extractSdkUserText(message: SdkUserMessage): string {
@@ -37,39 +39,25 @@ export function extractSdkUserText(message: SdkUserMessage): string {
  * Prompts sent to the SDK without a visible user_feedback echo (task
  * resumption, plan -> act auto-continue). They exist in SDK history but not
  * in the visible transcript, so ordinal mapping between the two must skip
- * them or every later user message maps one slot too early.
+ * them or every later user message maps one slot too early. The canonical
+ * definition lives in @cline/shared and is shared with the SDK's checkpoint
+ * run counting.
  */
 export function isSyntheticUserPrompt(text: string): boolean {
-	// Persisted prompts are wrapped by formatModePrompt as
-	// <user_input mode="...">...</user_input>; strip that before matching. A
-	// user-initiated plan -> act toggle can additionally prepend a
-	// <mode_notice> element to the canned continuation, so strip those too or
-	// the synthetic prompt would start counting as a visible user message and
-	// shift every later edit/regenerate ordinal by one.
-	const normalized = stripModeNotices(normalizeUserInput(text))
-	return normalized.startsWith("[TASK RESUMPTION]") || normalized === ACT_MODE_CONTINUATION_PROMPT
+	return isSyntheticContinuationPromptText(text)
 }
 
-function hasAttachmentBlocks(message: SdkUserMessage): boolean {
-	if (!Array.isArray(message.content)) {
-		return false
-	}
-	let hasAttachment = false
-	for (const block of message.content) {
-		if (!block || typeof block !== "object") {
-			continue
-		}
-		const type = (block as { type?: unknown }).type
-		// Tool results are role "user" in SDK history but are not user input;
-		// any media they carry must not make the message count as one.
-		if (type === "tool_result" || type === "tool-result") {
-			return false
-		}
-		if (type === "image" || type === "file") {
-			hasAttachment = true
-		}
-	}
-	return hasAttachment
+/**
+ * True when the SDK message counts as a genuine user turn: it has a visible
+ * user bubble in the transcript and a checkpoint run of its own. Delegates to
+ * @cline/core's shared filter so transcript mapping, checkpoint creation, and
+ * checkpoint restore can never drift from each other. False for tool results
+ * (folded into `role: "user"` messages in this wire format), synthetic
+ * kind-tagged notices (recovery/loop/compaction/completion reminders), and
+ * host continuation prompts without user attachments.
+ */
+export function isGenuineSdkUserMessage(message: SdkUserMessage): boolean {
+	return isGenuineUserPromptMessage(message as LlmsProviders.MessageWithMetadata)
 }
 
 /**
@@ -78,27 +66,36 @@ function hasAttachmentBlocks(message: SdkUserMessage): boolean {
  * user's image/file blocks AND a visible bubble, so it must still be counted.
  */
 export function isSyntheticSdkUserMessage(message: SdkUserMessage): boolean {
-	const text = extractSdkUserText(message)
-	return !!text && isSyntheticUserPrompt(text) && !hasAttachmentBlocks(message)
+	return message.role === "user" && !isGenuineSdkUserMessage(message)
 }
 
 /**
- * Maps the Nth visible user message (1-based ordinal over task/user_feedback
- * rows) to its index in the persisted SDK message history, skipping synthetic
- * prompts that have no visible counterpart.
+ * Maps the Nth genuine user message (1-based ordinal over checkpoint-run
+ * task/user_feedback rows) to its index in the persisted SDK message history,
+ * skipping synthetic prompts and tool results that have no visible
+ * counterpart.
  */
 export function findSdkUserMessageIndexByOrdinal(sdkMessages: SdkUserMessage[], userOrdinal: number): number {
 	let seenUsers = 0
 	return sdkMessages.findIndex((message) => {
-		if (message.role !== "user") {
-			return false
-		}
-		const text = extractSdkUserText(message)
-		const hasUserContent = !!text || hasAttachmentBlocks(message)
-		if (!hasUserContent || isSyntheticSdkUserMessage(message)) {
+		if (!isGenuineSdkUserMessage(message)) {
 			return false
 		}
 		seenUsers += 1
 		return seenUsers === userOrdinal
 	})
+}
+
+/**
+ * Counts the genuine user messages in the persisted SDK history — the number
+ * of checkpoint runs the persisted conversation contains.
+ */
+export function countGenuineSdkUserMessages(sdkMessages: SdkUserMessage[]): number {
+	let count = 0
+	for (const message of sdkMessages) {
+		if (isGenuineSdkUserMessage(message)) {
+			count += 1
+		}
+	}
+	return count
 }

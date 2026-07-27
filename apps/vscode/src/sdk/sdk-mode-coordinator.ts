@@ -1,5 +1,10 @@
 import { getProviderAuthStorageId } from "@cline/core"
-import { createModeSwitchNoticeTracker, type ModeSwitchNotice, type ModeSwitchNoticeTracker } from "@cline/shared"
+import {
+	ACT_MODE_CONTINUATION_PROMPT,
+	createModeSwitchNoticeTracker,
+	type ModeSwitchNotice,
+	type ModeSwitchNoticeTracker,
+} from "@cline/shared"
 import type { ChatContent } from "@shared/ChatContent"
 import type { ClineMessage, TurnPhase } from "@shared/ExtensionMessage"
 import type { Mode } from "@shared/storage/types"
@@ -22,7 +27,10 @@ function usesClineAccountAuth(providerId: string): boolean {
 	return getProviderAuthStorageId(providerId) === "cline"
 }
 
-export const ACT_MODE_CONTINUATION_PROMPT = "The user approved switching to act mode. Continue with the approved plan now."
+// The canonical definition lives in @cline/shared so the SDK's checkpoint run
+// counting and this host's transcript mapping share one notion of "synthetic
+// continuation prompt". Re-exported for existing importers.
+export { ACT_MODE_CONTINUATION_PROMPT }
 
 export interface SdkModeCoordinatorOptions {
 	stateManager: StateManager

@@ -190,6 +190,18 @@ export async function compareCheckpointToWorkspace(): Promise<CheckpointWorkspac
 	throw new Error("compareCheckpointToWorkspace is not implemented in the Vitest @cline/core stub")
 }
 
+export { retainCheckpointRefs } from "../../../../sdk/packages/core/src/hooks/checkpoint-hooks"
+// Real (dependency-light) checkpoint helpers, re-exported from the sdk source
+// so transcript-to-history mapping tests exercise the exact same "genuine user
+// turn" definition production uses. These modules only pull in @cline/shared,
+// @cline/llms types, and node:child_process — not the heavy core runtime.
+export {
+	countGenuineUserPromptMessages,
+	isGenuineUserPromptMessage,
+	isSyntheticUserMessageKind,
+} from "../../../../sdk/packages/core/src/session/checkpoint-message-filter"
+export { createRestoredCheckpointMetadata } from "../../../../sdk/packages/core/src/session/checkpoint-restore"
+
 export type CoreSessionEvent = { type: string; payload?: unknown }
 
 export type TelemetryProperties = Record<string, unknown>

@@ -12,15 +12,29 @@ interface UserMessageProps {
 	images?: string[]
 	messageTs?: number
 	sendMessageFromChatRow?: (text: string, images: string[], files: string[]) => void
+	/**
+	 * Only messages that started an agent run can be edited and regenerated.
+	 * Answers to in-run asks (question answers, tool approval feedback) have no
+	 * standalone message in SDK history to regenerate from.
+	 */
+	canEdit?: boolean
 	canRestoreWorkspace?: boolean
 }
 
-const UserMessage: React.FC<UserMessageProps> = ({ text, images, files, messageTs, canRestoreWorkspace = true }) => {
+const UserMessage: React.FC<UserMessageProps> = ({
+	text,
+	images,
+	files,
+	messageTs,
+	canEdit = true,
+	canRestoreWorkspace = true,
+}) => {
 	const [isEditing, setIsEditing] = useState(false)
 	const [editedText, setEditedText] = useState(text ?? "")
 	const [savingMode, setSavingMode] = useState<"chat" | "workspace" | undefined>()
 	const [errorMessage, setErrorMessage] = useState<string | undefined>()
 	const highlightedText = useMemo(() => highlightText(text), [text])
+	const editable = !!messageTs && canEdit
 
 	const startEditing = () => {
 		setEditedText(text ?? "")
@@ -73,11 +87,11 @@ const UserMessage: React.FC<UserMessageProps> = ({ text, images, files, messageT
 	return (
 		<div
 			className={`group relative p-2.5 my-1 text-badge-foreground rounded-xs ${
-				messageTs && !isEditing ? "cursor-pointer pr-8" : ""
+				editable && !isEditing ? "cursor-pointer pr-8" : ""
 			}`}
-			onClick={messageTs && !isEditing ? startEditing : undefined}
+			onClick={editable && !isEditing ? startEditing : undefined}
 			onKeyDown={
-				messageTs && !isEditing
+				editable && !isEditing
 					? (event) => {
 							if (event.key === "Enter" || event.key === " ") {
 								event.preventDefault()
@@ -86,15 +100,15 @@ const UserMessage: React.FC<UserMessageProps> = ({ text, images, files, messageT
 						}
 					: undefined
 			}
-			role={messageTs && !isEditing ? "button" : undefined}
+			role={editable && !isEditing ? "button" : undefined}
 			style={{
 				backgroundColor: "var(--vscode-badge-background)",
 				whiteSpace: "pre-line",
 				wordWrap: "break-word",
 			}}
-			tabIndex={messageTs && !isEditing ? 0 : undefined}
-			title={messageTs && !isEditing ? "Edit and regenerate from here" : undefined}>
-			{messageTs && !isEditing && (
+			tabIndex={editable && !isEditing ? 0 : undefined}
+			title={editable && !isEditing ? "Edit and regenerate from here" : undefined}>
+			{editable && !isEditing && (
 				<Tooltip>
 					<TooltipContent side="left">Edit and regenerate from here</TooltipContent>
 					<TooltipTrigger asChild>

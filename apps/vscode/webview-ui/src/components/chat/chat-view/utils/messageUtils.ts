@@ -77,6 +77,40 @@ function isVisibleCheckpointUserMessage(message: ClineMessage): boolean {
 	return message.type === "say" && (message.say === "task" || message.say === "user_feedback")
 }
 
+/**
+ * Ask rows whose user response is delivered INSIDE the running turn (folded
+ * into the pending tool's result) instead of as a standalone user message in
+ * SDK history. Keep in sync with the extension's copy in
+ * src/sdk/sdk-checkpoints.ts.
+ */
+const IN_RUN_ANSWER_ASKS = new Set<string>([
+	"followup",
+	"plan_mode_respond",
+	"act_mode_respond",
+	"mistake_limit_reached",
+	"tool",
+	"command",
+	"command_output",
+	"use_mcp_server",
+	"use_subagents",
+	"browser_action_launch",
+])
+
+/**
+ * Rows that prove the run progressed past the pending ask before the bubble
+ * was emitted. Keep in sync with the extension's copy in
+ * src/sdk/sdk-checkpoints.ts.
+ */
+function isRunProgressBarrier(message: ClineMessage): boolean {
+	return message.say === "api_req_started" || message.say === "error" || message.say === "completion_result"
+}
+
+/**
+ * True when the user_feedback bubble at `index` answered an in-run ask. Such
+ * bubbles have no standalone user message in SDK history, so they cannot be
+ * edited/regenerated or used as workspace-restore anchors. Keep in sync with
+ * the extension's copy in src/sdk/sdk-checkpoints.ts.
+ */
 function isCheckpointAnswerMessage(messages: ClineMessage[], index: number): boolean {
 	const message = messages[index]
 	if (message?.type !== "say" || message.say !== "user_feedback") {
@@ -85,13 +119,10 @@ function isCheckpointAnswerMessage(messages: ClineMessage[], index: number): boo
 
 	for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
 		const previous = messages[cursor]
-		if (previous.say === "checkpoint_created") {
-			continue
-		}
 		if (previous.type === "ask") {
-			return previous.ask === "followup" || previous.ask === "mistake_limit_reached"
+			return IN_RUN_ANSWER_ASKS.has(previous.ask ?? "")
 		}
-		if (isVisibleCheckpointUserMessage(previous)) {
+		if (isVisibleCheckpointUserMessage(previous) || isRunProgressBarrier(previous)) {
 			return false
 		}
 	}
@@ -99,7 +130,12 @@ function isCheckpointAnswerMessage(messages: ClineMessage[], index: number): boo
 	return false
 }
 
-export function canRestoreWorkspaceFromMessage(messages: ClineMessage[], messageTs: number | undefined): boolean {
+/**
+ * True when the message started an agent run: only these map 1:1 onto SDK
+ * conversation history, so only these can be edited/regenerated ("Reset
+ * Chat") or used to restore workspace state ("Reset Code").
+ */
+export function canEditAndRegenerateMessage(messages: ClineMessage[], messageTs: number | undefined): boolean {
 	if (messageTs === undefined) {
 		return false
 	}
@@ -108,6 +144,10 @@ export function canRestoreWorkspaceFromMessage(messages: ClineMessage[], message
 		return false
 	}
 	return isVisibleCheckpointUserMessage(messages[index]) && !isCheckpointAnswerMessage(messages, index)
+}
+
+export function canRestoreWorkspaceFromMessage(messages: ClineMessage[], messageTs: number | undefined): boolean {
+	return canEditAndRegenerateMessage(messages, messageTs)
 }
 
 /**

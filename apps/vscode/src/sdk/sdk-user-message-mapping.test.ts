@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { ACT_MODE_CONTINUATION_PROMPT } from "./sdk-mode-coordinator"
-import { extractSdkUserText, findSdkUserMessageIndexByOrdinal, isSyntheticUserPrompt } from "./sdk-user-message-mapping"
+import {
+	countGenuineSdkUserMessages,
+	extractSdkUserText,
+	findSdkUserMessageIndexByOrdinal,
+	isSyntheticUserPrompt,
+} from "./sdk-user-message-mapping"
 
 // Persisted prompts are wrapped by formatModePrompt before they reach SDK
 // history; the mapping must recognize the wrapped shape, not just raw text.
@@ -128,6 +133,32 @@ describe("findSdkUserMessageIndexByOrdinal", () => {
 		]
 
 		expect(findSdkUserMessageIndexByOrdinal(messages, 2)).toBe(2)
+	})
+
+	it("skips kind-tagged synthetic user messages (recovery notices, reminders)", () => {
+		const messages = [
+			user("task"),
+			assistant("working"),
+			{ role: "user", content: "A transient error occurred, continuing.", metadata: { kind: "recovery_notice" } },
+			assistant("recovered"),
+			{ role: "user", content: "Remember to call attempt_completion.", metadata: { kind: "completion_reminder" } },
+			user("follow-up"),
+		]
+
+		expect(findSdkUserMessageIndexByOrdinal(messages, 2)).toBe(5)
+		expect(countGenuineSdkUserMessages(messages)).toBe(2)
+	})
+
+	it("counts genuine user messages for the persistence-lag fallback", () => {
+		const messages = [
+			user("task"),
+			assistant("working"),
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1" }] },
+			user(wrapped("[TASK RESUMPTION] Please continue where you left off.")),
+			assistant("resumed"),
+		]
+
+		expect(countGenuineSdkUserMessages(messages)).toBe(1)
 	})
 })
 

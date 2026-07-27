@@ -7,10 +7,12 @@
 import * as fs from "node:fs/promises"
 import * as path from "node:path"
 import {
+	createRestoredCheckpointMetadata,
 	createUserInstructionConfigService,
 	getProviderAuthStorageId,
 	type PreparedRemoteConfigCoreIntegration,
 	resolveDefaultMcpSettingsPath,
+	retainCheckpointRefs,
 	type SessionHistoryRecord,
 	setTelemetryOptOutGlobally,
 	type UserInstructionConfigService,
@@ -50,6 +52,7 @@ import { arePathsEqual, getDesktopDir } from "@/utils/path"
 import { ClineAccountService } from "./account-service"
 import { AuthService, LogoutReason } from "./auth-service"
 import { buildStartSessionInput, createHistoryItemFromSession } from "./cline-session-factory"
+import { sanitizeInitialMessagesForSessionStart } from "./initial-message-sanitizer"
 import { MessageTranslatorState, reshapeErrorForWebview } from "./message-translator"
 import { createProviderCatalog } from "./model-catalog/catalog"
 import type { Disposable, ProviderCatalog, ProviderConfigChange, ProviderConfigStore } from "./model-catalog/contracts"
@@ -87,9 +90,10 @@ import { createVscodeSdkTelemetryHandle, type VscodeSdkTelemetryHandle } from ".
 import { SdkTerminalExecutionModeCoordinator } from "./sdk-terminal-execution-mode-coordinator"
 import { isToolAutoApproved } from "./sdk-tool-policies"
 import {
+	countGenuineSdkUserMessages,
 	extractSdkUserText,
 	findSdkUserMessageIndexByOrdinal,
-	isSyntheticSdkUserMessage,
+	isGenuineSdkUserMessage,
 	type SdkUserMessage,
 } from "./sdk-user-message-mapping"
 import { StatePostDebouncer } from "./state-post-debouncer"
@@ -1299,10 +1303,19 @@ export class Controller {
 			throw new Error("Edited message cannot be empty")
 		}
 
-		const activeSession = this.sessions.getActiveSession()
+		let activeSession = this.sessions.getActiveSession()
 		const currentTask = this.task
 		if (!currentTask) {
 			throw new Error("No active task to edit")
+		}
+
+		// Editing rewinds the conversation, so an in-flight turn is moot either
+		// way. Cancel it first: the abort path persists the conversation
+		// (including the message being edited), so the persisted history read
+		// below is current instead of one turn behind.
+		if (activeSession?.isRunning) {
+			await this.cancelTask()
+			activeSession = this.sessions.getActiveSession()
 		}
 
 		const clineMessages = currentTask.messageStateHandler.getClineMessages()
@@ -1315,29 +1328,46 @@ export class Controller {
 			throw new Error("Only user messages can be edited")
 		}
 
-		const userOrdinal = clineMessages
-			.slice(0, targetIndex + 1)
-			.filter((message) => message.type === "say" && (message.say === "task" || message.say === "user_feedback")).length
+		// The run ordinal counts only messages that started an agent run —
+		// answers to in-run asks (question answers, tool approval feedback) are
+		// folded into the pending tool's result and have no standalone message
+		// in SDK history, so they can be neither counted nor edited. This is the
+		// same numbering the SDK's checkpoint hook records entries under, which
+		// keeps the workspace restore below and the message trim consistent.
 		const checkpointRunCount = getCheckpointRunCountForMessage(clineMessages, targetIndex)
+		if (checkpointRunCount === undefined) {
+			throw new Error(
+				"This message answered a question or tool approval inside a run. Edit the message that started the run instead.",
+			)
+		}
 		const sourceSessionId = activeSession?.sessionId ?? currentTask.taskId
 		let sdkMessages: SdkUserMessage[]
 		let tempHost: VscodeSessionHost | undefined
 		const sessionHost = activeSession?.sdkHost ?? (tempHost = await VscodeSessionHost.create({ mcpHub: this.mcpHub }))
 		try {
 			sdkMessages = (await sessionHost.readMessages(sourceSessionId)) as SdkUserMessage[]
-			const sdkTargetIndex = findSdkUserMessageIndexByOrdinal(sdkMessages, userOrdinal)
+			let sdkTargetIndex = findSdkUserMessageIndexByOrdinal(sdkMessages, checkpointRunCount)
+			if (sdkTargetIndex === -1 && checkpointRunCount === countGenuineSdkUserMessages(sdkMessages) + 1) {
+				// The edited message is the newest user turn and its persistence
+				// hasn't caught up yet (e.g. the turn was just cancelled). The
+				// whole persisted history is the conversation before it.
+				sdkTargetIndex = sdkMessages.length
+			}
 			if (sdkTargetIndex === -1) {
 				throw new Error("Could not map edited message to persisted conversation history")
 			}
 
-			const initialMessages = sdkMessages.slice(0, sdkTargetIndex) as Parameters<
+			// Sanitize like the resume path: a cancelled turn can persist an
+			// assistant tool_use without its tool_result, which the SDK's strict
+			// pairing validation would reject on session start.
+			const initialMessages = sanitizeInitialMessagesForSessionStart(sdkMessages.slice(0, sdkTargetIndex)) as Parameters<
 				VscodeSessionHost["start"]
 			>[0]["initialMessages"]
 			const firstUserMessage = sdkMessages.find(
-				(message) => message.role === "user" && !!extractSdkUserText(message) && !isSyntheticSdkUserMessage(message),
+				(message) => isGenuineSdkUserMessage(message) && !!extractSdkUserText(message),
 			)
 			const historyTitle =
-				userOrdinal === 1
+				checkpointRunCount === 1
 					? editedText
 					: extractSdkUserText(firstUserMessage ?? {}) || clineMessages[0]?.text || editedText
 			const fallbackCwd = await this.getWorkspaceRoot()
@@ -1357,6 +1387,16 @@ export class Controller {
 				return
 			}
 
+			// Carry the source session's checkpoint history for the runs that
+			// survive the rewind into the new session's metadata. Without this,
+			// the regenerated session starts with no checkpoint entries and the
+			// next "Reset Code" on an earlier message fails with "No checkpoint
+			// found at or before run N". The regenerated run records its own
+			// fresh entry at `checkpointRunCount`, so only earlier runs carry.
+			const carriedCheckpointMetadata = sessionRecord
+				? createRestoredCheckpointMetadata(sessionRecord, checkpointRunCount - 1)
+				: undefined
+
 			const resolvedPrompt = await this.resolveContextMentions(editedText)
 			const startInput = {
 				...buildStartSessionInput(config, { prompt: historyTitle, cwd, mode }),
@@ -1364,16 +1404,11 @@ export class Controller {
 				sessionMetadata: {
 					title: historyTitle,
 					modelId: config.modelId,
+					...(carriedCheckpointMetadata ? { checkpoint: carriedCheckpointMetadata } : {}),
 				},
 			}
 
 			if (input.restoreWorkspace) {
-				if (activeSession?.isRunning) {
-					throw new Error("Wait for the current run to finish before restoring workspace changes")
-				}
-				if (checkpointRunCount === undefined) {
-					throw new Error("Workspace restore is only available for messages that started an agent run")
-				}
 				await sessionHost.restore({
 					sessionId: sourceSessionId,
 					checkpointRunCount,
@@ -1387,6 +1422,13 @@ export class Controller {
 			}
 
 			const { startResult, sdkHost } = await this.sessions.startNewSession(startInput)
+
+			// Keep the carried-over checkpoint stash commits reachable under the
+			// new session's ref namespace so git GC (or deleting the source
+			// session) cannot invalidate them.
+			if (carriedCheckpointMetadata && carriedCheckpointMetadata.history.length > 0) {
+				await retainCheckpointRefs(cwd, startResult.sessionId, carriedCheckpointMetadata.history)
+			}
 
 			this.turnStateTracker.set("streaming")
 			this.messageTranslatorState.clearTurnOutcome()
@@ -1410,7 +1452,7 @@ export class Controller {
 				{
 					ts: Date.now(),
 					type: "say",
-					say: userOrdinal === 1 ? "task" : "user_feedback",
+					say: checkpointRunCount === 1 ? "task" : "user_feedback",
 					text: editedText,
 					images: input.images,
 					files: input.files,
