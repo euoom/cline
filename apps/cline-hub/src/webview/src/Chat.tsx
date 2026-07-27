@@ -716,6 +716,7 @@ export default function Chat({
 		workspaceRoot: "",
 		cwd: "",
 	});
+	const [workspaceRoot, setWorkspaceRoot] = useState("");
 	const [sessions, setSessions] = useState<WebviewSessionSummary[]>([]);
 	const [sessionTitleDraft, setSessionTitleDraft] = useState("");
 	const [lastSelection, setLastSelection] =
@@ -826,6 +827,7 @@ export default function Chat({
 					return;
 				case "defaults":
 					setDefaults(message.defaults);
+					setWorkspaceRoot(message.defaults.workspaceRoot);
 					if (message.defaults.provider) {
 						setProvider(message.defaults.provider);
 					}
@@ -1431,6 +1433,7 @@ export default function Chat({
 								enableTools,
 								maxIterations: parseMaxIterations(maxIterations),
 								model: model || undefined,
+								workspaceRoot: workspaceRoot.trim() || undefined,
 								mode,
 								provider: provider || undefined,
 								reasonLevel: effectiveReasonLevel,
@@ -1439,6 +1442,7 @@ export default function Chat({
 						});
 					}}
 					onSystemPromptChange={setSystemPrompt}
+					onWorkspaceRootChange={setWorkspaceRoot}
 					onReasonLevelChange={setReasonLevel}
 					provider={provider}
 					providers={providers}
@@ -1446,7 +1450,7 @@ export default function Chat({
 					status={status}
 					systemPrompt={systemPrompt}
 					reasonLevel={effectiveReasonLevel}
-					workspaceRoot={defaults.workspaceRoot}
+					workspaceRoot={workspaceRoot}
 				/>
 			</div>
 		</PromptInputProvider>

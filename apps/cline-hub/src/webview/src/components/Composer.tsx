@@ -102,6 +102,7 @@ function ComposerSettings({
 	onModelChange,
 	onModelSelectorOpenChange,
 	onProviderChange,
+	onWorkspaceRootChange,
 	provider,
 	providers,
 	workspaceRoot,
@@ -122,6 +123,7 @@ function ComposerSettings({
 	onModelChange: (value: string) => void;
 	onModelSelectorOpenChange: (value: boolean) => void;
 	onProviderChange: (value: string) => void;
+	onWorkspaceRootChange: (value: string) => void;
 	onSystemPromptChange: (value: string) => void;
 	provider: string;
 	providers: ProviderOption[];
@@ -226,7 +228,13 @@ function ComposerSettings({
 					>
 						Workspace
 					</Label>
-					<Input id="workspace-root" readOnly value={workspaceRoot} />
+					<Input
+						id="workspace-root"
+						onClick={(event) => event.stopPropagation()}
+						onMouseDown={(event) => event.stopPropagation()}
+						onChange={(event) => onWorkspaceRootChange(event.target.value)}
+						value={workspaceRoot}
+					/>
 				</div>
 			</div>
 			<div className="grid gap-2 md:grid-cols-2">
@@ -318,6 +326,7 @@ export function Composer({
 	onModelSelectorOpenChange,
 	onProviderChange,
 	onSend,
+	onWorkspaceRootChange,
 	onSystemPromptChange,
 	onReasonLevelChange,
 	provider,
@@ -348,6 +357,7 @@ export function Composer({
 	onModelChange: (value: string) => void;
 	onModelSelectorOpenChange: (value: boolean) => void;
 	onProviderChange: (value: string) => void;
+	onWorkspaceRootChange: (value: string) => void;
 	onSend: (input: {
 		prompt: string;
 		attachments?: WebviewChatAttachments;
@@ -451,6 +461,7 @@ export function Composer({
 							onModelChange={onModelChange}
 							onModelSelectorOpenChange={onModelSelectorOpenChange}
 							onProviderChange={onProviderChange}
+							onWorkspaceRootChange={onWorkspaceRootChange}
 							onSystemPromptChange={onSystemPromptChange}
 							provider={provider}
 							providers={providers}
