@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+	ACT_MODE_CONTINUATION_PROMPT,
 	createModeSwitchNoticeTracker,
 	formatDisplayUserInput,
 	formatModeSwitchNotice,
 	formatUserCommandBlock,
 	formatUserInputBlock,
+	isSyntheticContinuationPromptText,
 	normalizeUserInput,
 	parseUserCommandEnvelope,
 	parseUserInputMode,
@@ -107,6 +109,29 @@ describe("prompt format helpers", () => {
 		const result = stripModeNotices(hostile);
 		expect(performance.now() - started).toBeLessThan(1_000);
 		expect(result).toBe(hostile);
+	});
+
+	it("recognizes synthetic continuation prompts, wrapped or raw", () => {
+		expect(
+			isSyntheticContinuationPromptText(
+				"[TASK RESUMPTION] Please continue where you left off.",
+			),
+		).toBe(true);
+		expect(
+			isSyntheticContinuationPromptText(ACT_MODE_CONTINUATION_PROMPT),
+		).toBe(true);
+		// Persisted prompts carry the formatModePrompt wrapper, and a
+		// user-initiated plan -> act toggle can prepend a mode notice.
+		expect(
+			isSyntheticContinuationPromptText(
+				`<user_input mode="act">${formatModeSwitchNotice("plan", "act")}\n${ACT_MODE_CONTINUATION_PROMPT}</user_input>`,
+			),
+		).toBe(true);
+		expect(
+			isSyntheticContinuationPromptText("continue with the plan please"),
+		).toBe(false);
+		expect(isSyntheticContinuationPromptText("")).toBe(false);
+		expect(isSyntheticContinuationPromptText(undefined)).toBe(false);
 	});
 });
 

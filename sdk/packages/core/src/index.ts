@@ -399,6 +399,7 @@ export type {
 	CheckpointEntry,
 	CheckpointMetadata,
 } from "./hooks/checkpoint-hooks";
+export { retainCheckpointRefs } from "./hooks/checkpoint-hooks";
 export * from "./hub";
 export { HubRuntimeHost } from "./hub/runtime-host/hub-runtime-host";
 export { RemoteRuntimeHost } from "./hub/runtime-host/remote-runtime-host";
@@ -724,6 +725,12 @@ export {
 	createCheckpointComparePlan,
 } from "./session/checkpoint-diff";
 export {
+	countGenuineUserPromptMessages,
+	isGenuineUserPromptMessage,
+	isSyntheticUserMessageKind,
+} from "./session/checkpoint-message-filter";
+export {
+	createRestoredCheckpointMetadata,
 	findCheckpointForRun,
 	readSessionCheckpointHistory,
 } from "./session/checkpoint-restore";

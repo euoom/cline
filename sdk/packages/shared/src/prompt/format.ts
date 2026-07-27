@@ -176,6 +176,37 @@ function removeTagElements(input: string, tag: string): string {
 	return result;
 }
 
+/**
+ * Canned continuation prompt hosts send when the user approves a plan -> act
+ * mode switch. It runs an agent turn but has no user-authored counterpart in
+ * the visible transcript.
+ */
+export const ACT_MODE_CONTINUATION_PROMPT =
+	"The user approved switching to act mode. Continue with the approved plan now.";
+
+const TASK_RESUMPTION_PREFIX = "[TASK RESUMPTION]";
+
+/**
+ * True for host-generated continuation prompts that are persisted as
+ * `role: "user"` messages but were never typed by the user: task resumption
+ * after an interruption and the plan -> act auto-continue. Transcript ordinal
+ * mapping and checkpoint run counting must share this definition, or the two
+ * sides drift and checkpoint restore / edit-and-regenerate resolve the wrong
+ * message (or none at all).
+ *
+ * Persisted prompts are wrapped by formatModePrompt as
+ * `<user_input mode="...">...</user_input>`, and a user-initiated plan -> act
+ * toggle can prepend a `<mode_notice>` element to the canned continuation, so
+ * both wrappers are stripped before matching.
+ */
+export function isSyntheticContinuationPromptText(input?: string): boolean {
+	const normalized = stripModeNotices(normalizeUserInput(input));
+	return (
+		normalized.startsWith(TASK_RESUMPTION_PREFIX) ||
+		normalized === ACT_MODE_CONTINUATION_PROMPT
+	);
+}
+
 export function formatDisplayUserInput(input?: string): string {
 	const normalized = stripModeNotices(normalizeUserInput(input));
 	const envelope = parseUserCommandEnvelope(input);

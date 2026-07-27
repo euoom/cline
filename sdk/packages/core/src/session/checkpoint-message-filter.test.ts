@@ -6,9 +6,9 @@ import {
 
 describe("isGenuineUserPromptMessage", () => {
 	it("rejects non-user roles", () => {
-		expect(isGenuineUserPromptMessage({ role: "assistant", content: "hi" })).toBe(
-			false,
-		);
+		expect(
+			isGenuineUserPromptMessage({ role: "assistant", content: "hi" }),
+		).toBe(false);
 	});
 
 	it("accepts plain text user messages", () => {
@@ -59,9 +59,11 @@ describe("isGenuineUserPromptMessage", () => {
 	it("rejects known synthetic system-injected kinds", () => {
 		for (const kind of [
 			"recovery_notice",
+			"compaction",
 			"compaction_summary",
 			"loop_detection_notice",
 			"mistake_stop_notice",
+			"completion_reminder",
 		]) {
 			expect(
 				isGenuineUserPromptMessage({
@@ -71,6 +73,47 @@ describe("isGenuineUserPromptMessage", () => {
 				}),
 			).toBe(false);
 		}
+	});
+
+	it("rejects host continuation prompts (task resumption, act auto-continue)", () => {
+		expect(
+			isGenuineUserPromptMessage({
+				role: "user",
+				content: "[TASK RESUMPTION] Please continue where you left off.",
+			}),
+		).toBe(false);
+		// Persisted prompts carry the formatModePrompt wrapper.
+		expect(
+			isGenuineUserPromptMessage({
+				role: "user",
+				content:
+					'<user_input mode="act">[TASK RESUMPTION] Please continue where you left off.</user_input>',
+			}),
+		).toBe(false);
+		expect(
+			isGenuineUserPromptMessage({
+				role: "user",
+				content:
+					"The user approved switching to act mode. Continue with the approved plan now.",
+			}),
+		).toBe(false);
+	});
+
+	it("accepts continuation prompts that carry user attachments", () => {
+		// An attachment-only plan -> act toggle has a visible bubble for the
+		// attachment, so the message still counts as a genuine turn.
+		expect(
+			isGenuineUserPromptMessage({
+				role: "user",
+				content: [
+					{
+						type: "text",
+						text: "The user approved switching to act mode. Continue with the approved plan now.",
+					},
+					{ type: "image", mediaType: "image/png", data: "abc" },
+				],
+			}),
+		).toBe(true);
 	});
 });
 

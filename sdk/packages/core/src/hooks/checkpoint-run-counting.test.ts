@@ -41,6 +41,55 @@ describe("isGenuineUserPromptMessage (AgentMessage)", () => {
 		// it must keep counting as a real turn.
 		expect(isGenuineUserPromptMessage(message("user"))).toBe(true);
 	});
+
+	it("rejects host continuation prompts (task resumption, act auto-continue)", () => {
+		const withText = (text: string): AgentMessage => ({
+			id: "m",
+			role: "user",
+			content: [{ type: "text", text }],
+			createdAt: 0,
+		});
+		expect(
+			isGenuineUserPromptMessage(
+				withText("[TASK RESUMPTION] Please continue where you left off."),
+			),
+		).toBe(false);
+		expect(
+			isGenuineUserPromptMessage(
+				withText(
+					'<user_input mode="act">The user approved switching to act mode. Continue with the approved plan now.</user_input>',
+				),
+			),
+		).toBe(false);
+	});
+
+	it("accepts a continuation prompt that carries user attachments", () => {
+		expect(
+			isGenuineUserPromptMessage({
+				id: "m",
+				role: "user",
+				content: [
+					{
+						type: "text",
+						text: "The user approved switching to act mode. Continue with the approved plan now.",
+					},
+					{ type: "image", image: "abc", mediaType: "image/png" },
+				],
+				createdAt: 0,
+			}),
+		).toBe(true);
+	});
+
+	it("rejects an empty user message", () => {
+		expect(
+			isGenuineUserPromptMessage({
+				id: "m",
+				role: "user",
+				content: [{ type: "text", text: "   " }],
+				createdAt: 0,
+			}),
+		).toBe(false);
+	});
 });
 
 describe("countGenuineUserPromptMessages (AgentMessage)", () => {

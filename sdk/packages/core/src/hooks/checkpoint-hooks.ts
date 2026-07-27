@@ -1,7 +1,10 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import type { AgentHooks, BasicLogger } from "@cline/shared";
-import { countGenuineUserPromptMessages } from "./checkpoint-run-counting";
+import {
+	countGenuineUserPromptMessages,
+	isGenuineUserPromptMessage,
+} from "./checkpoint-run-counting";
 
 const execFile = promisify(execFileCallback);
 
@@ -275,6 +278,24 @@ export function createCheckpointHooks(
 			if (snapshot.parentAgentId != null || snapshot.iteration !== 1) {
 				return undefined;
 			}
+			// A run triggered by a synthetic user message (a recovery notice
+			// after a transient failure, a loop-detection warning, a host
+			// continuation prompt like task resumption or plan -> act
+			// auto-continue) is not a new user turn: the genuine-user count is
+			// unchanged, so creating a checkpoint here would overwrite the
+			// entry recorded at the start of the CURRENT genuine turn with a
+			// snapshot of whatever half-finished state that turn has produced
+			// so far - silently corrupting the restore target for that turn.
+			for (let index = snapshot.messages.length - 1; index >= 0; index -= 1) {
+				const message = snapshot.messages[index];
+				if (message?.role !== "user") {
+					continue;
+				}
+				if (!isGenuineUserPromptMessage(message)) {
+					return undefined;
+				}
+				break;
+			}
 			const runCount = countGenuineUserPromptMessages(snapshot.messages);
 			if (runCount < 1) {
 				return undefined;
@@ -291,10 +312,7 @@ export function createCheckpointHooks(
 			}
 			await options.writeSessionMetadata((current) => {
 				const existing = readCheckpointMetadata(current);
-				const history = upsertCheckpointHistory(
-					existing?.history ?? [],
-					entry,
-				);
+				const history = upsertCheckpointHistory(existing?.history ?? [], entry);
 				return {
 					...(current ?? {}),
 					checkpoint: {

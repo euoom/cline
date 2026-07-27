@@ -262,12 +262,14 @@ export type {
 	ModeSwitchNoticeTracker,
 } from "./prompt/format";
 export {
+	ACT_MODE_CONTINUATION_PROMPT,
 	createModeSwitchNoticeTracker,
 	formatDisplayUserInput,
 	formatFileContentBlock,
 	formatModeSwitchNotice,
 	formatUserCommandBlock,
 	formatUserInputBlock,
+	isSyntheticContinuationPromptText,
 	normalizeUserInput,
 	parseUserCommandEnvelope,
 	parseUserInputMode,

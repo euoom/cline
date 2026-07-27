@@ -203,11 +203,9 @@ describe("createCheckpointHooks", () => {
 			});
 
 			await writeFile(join(cwd, "note.txt"), "subagent-dirty\n", "utf8");
-			await runCheckpointHooks(
-				hooks,
-				[userMessage("subagent turn")],
-				{ parentAgentId: "agent_root" },
-			);
+			await runCheckpointHooks(hooks, [userMessage("subagent turn")], {
+				parentAgentId: "agent_root",
+			});
 
 			expect(writes).toBe(0);
 		} finally {
@@ -277,6 +275,63 @@ describe("createCheckpointHooks", () => {
 
 		const checkpoint = metadata?.checkpoint as CheckpointMetadata;
 		expect(checkpoint.latest.runCount).toBe(2);
+	});
+
+	it("skips checkpoint creation for runs triggered by a synthetic message", async () => {
+		// A continuation run (recovery notice after a transient failure, loop
+		// warning, host task-resumption prompt) starts with an unchanged
+		// genuine-user count. Creating a checkpoint there would overwrite the
+		// entry recorded at the start of the current genuine turn with the
+		// turn's half-finished workspace state.
+		let metadata: Record<string, unknown> | undefined = {
+			checkpoint: {
+				latest: { ref: "one", createdAt: 1, runCount: 1, kind: "commit" },
+				history: [{ ref: "one", createdAt: 1, runCount: 1, kind: "commit" }],
+			},
+		};
+		let checkpointCalls = 0;
+		const hooks = createCheckpointHooks({
+			cwd: "/tmp",
+			sessionId: "sess_synthetic_trigger",
+			createCheckpoint: ({ runCount }) => {
+				checkpointCalls += 1;
+				return {
+					ref: `mid-turn-${runCount}`,
+					createdAt: 99,
+					runCount,
+					kind: "commit",
+				};
+			},
+			readSessionMetadata: async () => metadata,
+			writeSessionMetadata: async (updater) => {
+				metadata = updater(metadata);
+			},
+		});
+
+		await runCheckpointHooks(hooks, [
+			userMessage("first"),
+			assistantMessage("partial work"),
+			userMessage("A transient error occurred, continuing.", {
+				kind: "recovery_notice",
+			}),
+		]);
+
+		expect(checkpointCalls).toBe(0);
+		const checkpoint = metadata?.checkpoint as CheckpointMetadata;
+		expect(checkpoint.latest.ref).toBe("one");
+		expect(checkpoint.history).toHaveLength(1);
+
+		// Same for host continuation prompts, which carry no metadata tag.
+		await runCheckpointHooks(hooks, [
+			userMessage("first"),
+			assistantMessage("partial work"),
+			userMessage("[TASK RESUMPTION] Please continue where you left off."),
+		]);
+
+		expect(checkpointCalls).toBe(0);
+		expect((metadata?.checkpoint as CheckpointMetadata).history).toHaveLength(
+			1,
+		);
 	});
 
 	it("continues checkpoint numbering after seeded messages", async () => {

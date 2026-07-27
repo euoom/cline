@@ -1,8 +1,10 @@
 // This file provides a single, shared definition of "a genuine user turn"
 // for the persisted conversation format (`LlmsProviders.Message`), reused by
-// both checkpoint creation (via checkpoint-run-counting.ts) and checkpoint
-// restore so the two can never drift from each other again.
+// checkpoint creation (via checkpoint-run-counting.ts), checkpoint restore,
+// and the VS Code extension's transcript-to-history ordinal mapping so none
+// of them can drift from each other.
 import type * as LlmsProviders from "@cline/llms";
+import { isSyntheticContinuationPromptText } from "@cline/shared";
 
 /**
  * Metadata `kind` tags that mark a `role: "user"` message as a synthetic,
@@ -12,6 +14,7 @@ import type * as LlmsProviders from "@cline/llms";
  */
 const SYNTHETIC_USER_MESSAGE_KINDS = new Set([
 	"recovery_notice",
+	"compaction",
 	"compaction_summary",
 	"loop_detection_notice",
 	"mistake_stop_notice",
@@ -21,6 +24,10 @@ const SYNTHETIC_USER_MESSAGE_KINDS = new Set([
 	// so a reminder can end up persisted into the stored conversation.
 	"completion_reminder",
 ]);
+
+export function isSyntheticUserMessageKind(kind: unknown): boolean {
+	return typeof kind === "string" && SYNTHETIC_USER_MESSAGE_KINDS.has(kind);
+}
 
 type GenericMessage = LlmsProviders.Message | LlmsProviders.MessageWithMetadata;
 
@@ -35,32 +42,85 @@ function readMessageMetadata(
 		: undefined;
 }
 
+function extractUserText(content: GenericMessage["content"]): string {
+	if (typeof content === "string") {
+		return content.trim();
+	}
+	if (!Array.isArray(content)) {
+		return "";
+	}
+	return content
+		.map((block) => {
+			// Persisted JSON can carry malformed entries; guard before reading.
+			if (!block || typeof block !== "object") {
+				return "";
+			}
+			if (block.type === "text" && typeof block.text === "string") {
+				return block.text.trim();
+			}
+			if (block.type === "file" && typeof block.content === "string") {
+				return block.content.trim();
+			}
+			return "";
+		})
+		.filter(Boolean)
+		.join("\n")
+		.trim();
+}
+
+function hasAttachmentBlocks(content: GenericMessage["content"]): boolean {
+	if (!Array.isArray(content)) {
+		return false;
+	}
+	let hasAttachment = false;
+	for (const block of content) {
+		if (!block || typeof block !== "object") {
+			continue;
+		}
+		// Tool results are role "user" in this wire format but are not user
+		// input; any media they carry must not make the message count as one.
+		if (block.type === "tool_result") {
+			return false;
+		}
+		if (block.type === "image" || block.type === "file") {
+			hasAttachment = true;
+		}
+	}
+	return hasAttachment;
+}
+
 /**
  * A stored/persisted message counts as a genuine user-initiated turn only if:
  *  - its role is "user",
- *  - it isn't tagged as one of the synthetic system-injected kinds above, and
- *  - its content carries at least one block that isn't a tool_result (tool
- *    results are modeled as `role: "user"` messages in this wire format - see
- *    ToolResultContent in @cline/shared - so a message consisting solely of
- *    tool_result blocks is an internal continuation, not a user turn). A
- *    message mixing real content with a tool_result still counts as genuine.
+ *  - it isn't tagged as one of the synthetic system-injected kinds above,
+ *  - it isn't a host-generated continuation prompt (task resumption /
+ *    plan -> act auto-continue) without user attachments - those exist in
+ *    history but have no visible user-authored counterpart, and
+ *  - its content carries visible user input: non-empty text or an image/file
+ *    attachment. Tool results are modeled as `role: "user"` messages in this
+ *    wire format (see ToolResultContent in @cline/shared), so a message
+ *    consisting solely of tool_result blocks is an internal continuation,
+ *    not a user turn.
  */
 export function isGenuineUserPromptMessage(message: GenericMessage): boolean {
 	if (message.role !== "user") {
 		return false;
 	}
-	const kind = readMessageMetadata(message)?.kind;
-	if (typeof kind === "string" && SYNTHETIC_USER_MESSAGE_KINDS.has(kind)) {
+	if (isSyntheticUserMessageKind(readMessageMetadata(message)?.kind)) {
 		return false;
 	}
-	const content = message.content;
-	if (typeof content === "string") {
-		return content.trim().length > 0;
-	}
-	if (!Array.isArray(content) || content.length === 0) {
+	const text = extractUserText(message.content);
+	const hasAttachments = hasAttachmentBlocks(message.content);
+	if (!text && !hasAttachments) {
 		return false;
 	}
-	return content.some((block) => block.type !== "tool_result");
+	// An attachment-carrying continuation holds the synthetic text alongside
+	// the user's image/file blocks AND a visible transcript bubble, so it
+	// still counts as a genuine turn.
+	if (!hasAttachments && isSyntheticContinuationPromptText(text)) {
+		return false;
+	}
+	return true;
 }
 
 export function countGenuineUserPromptMessages(
