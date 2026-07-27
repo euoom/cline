@@ -757,6 +757,63 @@ function migrateLegacyModelOverridesIfNeeded(providerId: ProviderId, modelId: st
 	}
 }
 
+function withoutNameOverride(overrides: ModelSelectionOverrides): ModelSelectionOverrides | undefined {
+	const { name: _name, ...rest } = overrides
+	return normalizeModelSelectionOverrides(rest)
+}
+
+function readCarryOverOverrides(providerId: ProviderId, mode: Mode, nextModelId: string): ModelSelectionOverrides | undefined {
+	// Prefer the stored overrides of the model id being switched away from.
+	const apiConfiguration = StateManager.get().getApiConfiguration()
+	const previousModelId = apiConfiguration[getModelIdKey(providerId, mode)]
+	if (typeof previousModelId === "string" && previousModelId.length > 0 && previousModelId !== nextModelId) {
+		const previousOverrides = readModelOverrides(providerId, previousModelId)
+		if (previousOverrides) {
+			return withoutNameOverride(previousOverrides)
+		}
+	}
+	// Otherwise diff the mode's resolved state snapshot against fallback
+	// defaults. The snapshot is the only record left when the previous
+	// metadata was seeded straight into legacy state and never migrated, or
+	// when the state model id was already rewritten to the new id by the
+	// picker's concurrent legacy-field write.
+	const modelInfoKey = getModelInfoKey(providerId, mode)
+	const stateModelInfo = modelInfoKey ? apiConfiguration[modelInfoKey] : undefined
+	if (!isModelInfo(stateModelInfo)) {
+		return undefined
+	}
+	const overrides = legacyModelInfoToOverrides(stateModelInfo as LegacyModelInfo, fallbackModelInfo(nextModelId))
+	return overrides ? withoutNameOverride(overrides) : undefined
+}
+
+/**
+ * Legacy OpenAI Compatible behavior: custom model metadata (prices, context
+ * window, capabilities) lived in a single `*ModeOpenAiModelInfo` blob that
+ * survived model-id edits. models.json keys the same metadata per model id,
+ * so a model-id-only commit for an id with no stored entry would resolve to
+ * safe defaults — silently flipping `supportsPromptCache` off and billing
+ * paid requests at $0 (safe-default prices are 0, not "unknown"). Preserve
+ * the legacy semantics by carrying the previous user-authored metadata
+ * (minus the display name) over to the new id.
+ */
+function carryOverOpenAiCompatibleOverrides(providerId: ProviderId, mode: Mode, nextModelId: string): void {
+	if (providerSettingsProviderId(providerId) !== "openai-compatible") {
+		return
+	}
+	if (readStoredModelEntry(providerId, nextModelId).exists) {
+		// The target model already has its own user-authored metadata.
+		return
+	}
+	if (readBaseModelInfoForProvider(providerId, nextModelId) !== undefined) {
+		// The target model has real catalog metadata.
+		return
+	}
+	const carried = readCarryOverOverrides(providerId, mode, nextModelId)
+	if (carried) {
+		writeModelOverrides(providerId, nextModelId, carried)
+	}
+}
+
 /**
  * The picker writes the live model metadata to the mode-specific
  * `*ModeModelInfo` state key before committing. When the state still refers to
@@ -883,6 +940,12 @@ export function createProviderConfigStore(): ProviderConfigStore {
 		},
 
 		commitSelection(providerId: ProviderId, mode: Mode, selection: ModelSelection): void {
+			// A model-id-only commit must not degrade user-authored metadata
+			// to safe defaults; carry the previous model's metadata forward
+			// before the previous selection is overwritten.
+			if (selection.overrides === undefined) {
+				carryOverOpenAiCompatibleOverrides(providerId, mode, selection.modelId)
+			}
 			writeSelectionToProviderSettings(providerId, selection)
 			if (selection.overrides !== undefined) {
 				writeModelOverrides(providerId, selection.modelId, selection.overrides)

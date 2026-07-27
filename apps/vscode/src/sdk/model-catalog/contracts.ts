@@ -405,6 +405,12 @@ export interface ProviderConfigStore extends ProviderConfigReader {
 	 * Supplying overrides replaces that model's stored override entry; omitting
 	 * them leaves the existing entry unchanged.
 	 *
+	 * openai-compatible keeps its legacy semantics: user-authored model
+	 * metadata follows a model-id-only commit. When the new id has neither a
+	 * stored override entry nor catalog metadata, the previous selection's
+	 * metadata (minus the display name) is carried over instead of resetting
+	 * to safe defaults, whose zero prices would misbill paid requests as $0.
+	 *
 	 * I2: refresh handlers do not have access to this method by type, since
 	 * `ProviderCatalog` holds only a `ProviderConfigReader`.
 	 */

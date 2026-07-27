@@ -514,6 +514,161 @@ describe("createProviderConfigStore", () => {
 		})
 	})
 
+	it("carries user-authored OpenAI Compatible metadata to a new model id on a model-id-only commit", async () => {
+		const { createProviderConfigStore } = await import("./store")
+		const store = createProviderConfigStore()
+		const providerId = parseProviderId("openai")
+
+		store.commitSelection(providerId, "act", {
+			providerId,
+			modelId: "model-a",
+			overrides: {
+				name: "Model A",
+				contextWindow: 1_300_000,
+				inputPrice: 3,
+				outputPrice: 15,
+				capabilities: ["images", "prompt-cache"],
+			},
+		})
+
+		// The picker commits a model-id change without overrides. The new id is
+		// unknown to the catalog, so without carry-over it would resolve to
+		// safe defaults (prices 0) and paid requests would bill at $0.
+		store.commitSelection(providerId, "act", { providerId, modelId: "model-b" })
+
+		expect(mocks.getModelsFile().providers["openai-compatible"]?.models?.["model-b"]).toEqual({
+			contextWindow: 1_300_000,
+			inputPrice: 3,
+			outputPrice: 15,
+			capabilities: ["images", "prompt-cache"],
+		})
+		const selection = store.readSelection(providerId, "act")
+		expect(selection?.modelInfo).toMatchObject({
+			contextWindow: 1_300_000,
+			inputPrice: 3,
+			outputPrice: 15,
+			supportsPromptCache: true,
+		})
+		// The old model's display name must not follow the id change.
+		expect(selection?.modelInfo.name).toBe("model-b")
+		expect(mocks.getApiConfiguration().actModeOpenAiModelInfo).toMatchObject({
+			inputPrice: 3,
+			outputPrice: 15,
+			supportsPromptCache: true,
+		})
+		// The previous model keeps its own entry.
+		expect(mocks.getModelsFile().providers["openai-compatible"]?.models?.["model-a"]).toMatchObject({
+			name: "Model A",
+			inputPrice: 3,
+			outputPrice: 15,
+		})
+	})
+
+	it("carries seeded legacy state metadata when the model id changes before any read migrated it", async () => {
+		mocks.setApiConfiguration({
+			actModeApiProvider: "openai",
+			actModeOpenAiModelId: "seeded-model",
+			actModeOpenAiModelInfo: {
+				...openAiModelInfoSafeDefaults,
+				name: "seeded-model",
+				supportsPromptCache: true,
+				inputPrice: 2.5,
+				outputPrice: 10,
+			},
+		})
+		const { createProviderConfigStore } = await import("./store")
+		const store = createProviderConfigStore()
+		const providerId = parseProviderId("openai")
+
+		store.commitSelection(providerId, "act", { providerId, modelId: "fault/big-usage" })
+
+		expect(mocks.getModelsFile().providers["openai-compatible"]?.models?.["fault/big-usage"]).toEqual({
+			capabilities: ["images", "prompt-cache"],
+			inputPrice: 2.5,
+			outputPrice: 10,
+		})
+		expect(mocks.getApiConfiguration().actModeOpenAiModelInfo).toMatchObject({
+			name: "fault/big-usage",
+			supportsPromptCache: true,
+			inputPrice: 2.5,
+			outputPrice: 10,
+		})
+		expect(store.readSelection(providerId, "act")?.modelInfo).toMatchObject({
+			inputPrice: 2.5,
+			outputPrice: 10,
+			supportsPromptCache: true,
+		})
+	})
+
+	it("does not carry metadata onto a model id that already has its own stored entry", async () => {
+		mocks.setModelsFile({
+			version: 1,
+			providers: {
+				"openai-compatible": { models: { "model-b": { inputPrice: 9, outputPrice: 18 } } },
+			},
+		})
+		const { createProviderConfigStore } = await import("./store")
+		const store = createProviderConfigStore()
+		const providerId = parseProviderId("openai")
+
+		store.commitSelection(providerId, "act", {
+			providerId,
+			modelId: "model-a",
+			overrides: { inputPrice: 1, outputPrice: 2 },
+		})
+		store.commitSelection(providerId, "act", { providerId, modelId: "model-b" })
+
+		expect(mocks.getModelsFile().providers["openai-compatible"]?.models?.["model-b"]).toEqual({
+			inputPrice: 9,
+			outputPrice: 18,
+		})
+		expect(store.readSelection(providerId, "act")?.modelInfo).toMatchObject({ inputPrice: 9, outputPrice: 18 })
+	})
+
+	it("does not carry metadata onto a catalog-known model id", async () => {
+		mocks.setGeneratedModels("openai-compatible", {
+			"known-model": {
+				name: "Known Catalog Model",
+				contextWindow: 256_000,
+				supportsPromptCache: false,
+				inputPrice: 0.5,
+				outputPrice: 1.5,
+			},
+		})
+		const { createProviderConfigStore } = await import("./store")
+		const store = createProviderConfigStore()
+		const providerId = parseProviderId("openai")
+
+		store.commitSelection(providerId, "act", {
+			providerId,
+			modelId: "model-a",
+			overrides: { inputPrice: 7, outputPrice: 21 },
+		})
+		store.commitSelection(providerId, "act", { providerId, modelId: "known-model" })
+
+		expect(mocks.getModelsFile().providers["openai-compatible"]?.models?.["known-model"]).toBeUndefined()
+		expect(store.readSelection(providerId, "act")?.modelInfo).toMatchObject({
+			name: "Known Catalog Model",
+			inputPrice: 0.5,
+			outputPrice: 1.5,
+		})
+	})
+
+	it("does not carry OpenAI Compatible metadata across other providers' model-id-only commits", async () => {
+		const { createProviderConfigStore } = await import("./store")
+		const store = createProviderConfigStore()
+		const providerId = parseProviderId("openrouter")
+
+		store.commitSelection(providerId, "act", {
+			providerId,
+			modelId: "provider/model-a",
+			overrides: { inputPrice: 3, outputPrice: 15 },
+		})
+		store.commitSelection(providerId, "act", { providerId, modelId: "provider/model-b" })
+
+		expect(mocks.getModelsFile().providers.openrouter?.models?.["provider/model-b"]).toBeUndefined()
+	})
+
 	it("deletes a model entry when an explicit replacement override set is empty", async () => {
 		const { createProviderConfigStore } = await import("./store")
 		const store = createProviderConfigStore()
