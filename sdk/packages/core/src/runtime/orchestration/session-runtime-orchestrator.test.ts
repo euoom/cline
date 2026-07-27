@@ -30,6 +30,7 @@ import {
 	type AgentRuntimeEvent,
 	type AgentTool,
 	type AgentToolContext,
+	type ConsecutiveMistakeLimitContext,
 	EMPTY_CONTENT_TEXT,
 } from "@cline/shared";
 import { describe, expect, it, vi } from "vitest";
@@ -2326,7 +2327,7 @@ describe("SessionRuntime.run — consecutive tool-denial guard (ENG-2329)", () =
 	});
 
 	it("resolves the host limit callback with reason tool_approval_denied and honors continue-with-guidance", async () => {
-		const onLimit = vi.fn(async () => ({
+		const onLimit = vi.fn(async (_context: ConsecutiveMistakeLimitContext) => ({
 			action: "continue" as const,
 			guidance: "The user keeps rejecting this; ask what they want instead.",
 		}));
@@ -2354,6 +2355,75 @@ describe("SessionRuntime.run — consecutive tool-denial guard (ENG-2329)", () =
 			maxConsecutiveMistakes: 3,
 		});
 		expect(abortCalls).toHaveLength(0);
+	});
+
+	it("lands the denial-stop abort at the turn boundary, before a next turn could start", async () => {
+		// Mirrors the real AgentRuntime emit order: sync listeners first, then
+		// awaited onEvent hooks. The orchestrator's turn-finished hook must
+		// drain tracker work so the abort is already issued when the hook
+		// resolves — otherwise a 4th model request/approval ask can slip
+		// through after the "stopped after 3 rejections" decision.
+		const abortCalls: string[] = [];
+		const abortedAtTurnBoundary: boolean[] = [];
+		const events = [
+			...deniedToolTurnEvents(1),
+			...deniedToolTurnEvents(2),
+			...deniedToolTurnEvents(3),
+		];
+		const baseResult: AgentRunResult = {
+			agentId: "agent_fake",
+			runId: "run_fake",
+			status: "completed",
+			iterations: 3,
+			outputText: "",
+			messages: [],
+			usage: {
+				inputTokens: 0,
+				outputTokens: 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				totalCost: 0,
+			},
+		};
+		let listener: ((e: AgentRuntimeEvent) => void) | undefined;
+		let capturedConfig: AgentRuntimeConfig | undefined;
+		const runtime = {
+			async run() {
+				for (const event of events) {
+					listener?.(event);
+					await capturedConfig?.hooks?.onEvent?.(event);
+					if (event.type === "turn-finished") {
+						abortedAtTurnBoundary.push(abortCalls.length > 0);
+					}
+				}
+				return baseResult;
+			},
+			async continue() {
+				return baseResult;
+			},
+			abort(reason?: string) {
+				abortCalls.push(reason ?? "");
+			},
+			subscribe(l: (e: AgentRuntimeEvent) => void) {
+				listener = l;
+				return () => {
+					listener = undefined;
+				};
+			},
+			snapshot: makeSnapshot,
+		} as unknown as AgentRuntime;
+		const session = new SessionRuntime(makeAgentConfig(), {
+			createAgentRuntimeImpl: (config) => {
+				capturedConfig = config;
+				return runtime;
+			},
+		});
+
+		await session.run("create the file");
+
+		// Turn 1 and 2: below the limit, no abort. Turn 3: the abort has
+		// already been issued by the time the turn-finished hook resolves.
+		expect(abortedAtTurnBoundary).toEqual([false, false, true]);
 	});
 
 	it("honors a custom maxConsecutiveToolDenials", async () => {

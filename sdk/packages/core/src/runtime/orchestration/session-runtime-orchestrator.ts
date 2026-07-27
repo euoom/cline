@@ -1035,6 +1035,27 @@ export class SessionRuntime {
 					messages: preparedMessages,
 				};
 			},
+			onEvent: async (event) => {
+				await hooks.onEvent?.(event);
+				if (event.type === "turn-finished") {
+					// The runtime awaits onEvent hooks before starting the next
+					// turn. Draining the tracker work here makes mistake/loop/
+					// denial stop decisions land synchronously at the turn
+					// boundary: an abort issued by a tracker is observed by
+					// `throwIfAborted` before the next model request, so no
+					// extra provider call or approval ask can slip through
+					// after a stop (e.g. a 4th edit proposal rendering under
+					// the "stopped after 3 rejections" row).
+					try {
+						await this.activeTrackerWork;
+					} catch (error) {
+						this.logger?.error?.(
+							"SessionRuntime tracker work failed at turn boundary",
+							{ agentId: this.agentId, error },
+						);
+					}
+				}
+			},
 		};
 	}
 
