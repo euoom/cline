@@ -163,7 +163,25 @@ export class SdkCompactionCoordinator {
 			}
 
 			const resumeStart = await prepareTaskResumeStartInput(this.options, taskId)
-			if (this.options.sessions.getActiveSession() || this.options.getDisplayedTaskId() !== taskId) {
+			// Preparation awaits, so a path that doesn't hold the rebuild mutex
+			// (e.g. task init) may have made a session active meanwhile. Mirror
+			// the pre-prepare branch: compact a matching idle live session, and
+			// only cancel when the target genuinely changed.
+			const nowActive = this.options.sessions.getActiveSession()
+			if (nowActive) {
+				if (nowActive.sessionId !== taskId) {
+					Logger.log(`[SdkController] compactTask: Target changed before resuming ${taskId}; cancelling`)
+					return
+				}
+				if (nowActive.isRunning) {
+					this.emitInfo(COMPACTION_TURN_RUNNING_MESSAGE, taskId)
+					await this.options.postStateToWebview()
+					return
+				}
+				await this.runCompaction(nowActive.sdkHost, taskId)
+				return
+			}
+			if (this.options.getDisplayedTaskId() !== taskId) {
 				Logger.log(`[SdkController] compactTask: Target changed before resuming ${taskId}; cancelling`)
 				return
 			}
