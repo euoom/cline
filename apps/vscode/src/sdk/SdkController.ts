@@ -381,6 +381,10 @@ export class Controller {
 				this.turnStateTracker.set("error")
 				const errorMessage = error instanceof Error ? error.message : String(error)
 				const providerId = this.getSessionProviderId(sessionId) ?? this.getActiveProviderId()
+				// When the agent stream already surfaced this failure (the translator
+				// emitted the api_req_failed row for the "error" event), emitting again
+				// here would render the same error twice.
+				const errorAlreadySurfaced = this.messageTranslatorState.wasErrorSeen()
 				const isClineAuthError =
 					isClineManagedProvider(providerId) &&
 					(errorMessage.includes(CLINE_ACCOUNT_AUTH_ERROR_MESSAGE) ||
@@ -395,7 +399,9 @@ export class Controller {
 						errorType: PROVIDER_FAILURE_ERROR_TYPE.AUTH,
 						failurePhase: PROVIDER_FAILURE_PHASE.PREFLIGHT,
 					})
-					this.emitClineAuthError()
+					if (!errorAlreadySurfaced) {
+						this.emitClineAuthError()
+					}
 				} else if (isClineManagedProvider(providerId) && this.isClineBalanceError(errorMessage)) {
 					this.captureProviderFailure({
 						sessionId,
@@ -404,7 +410,9 @@ export class Controller {
 						errorType: PROVIDER_FAILURE_ERROR_TYPE.BALANCE,
 						failurePhase: PROVIDER_FAILURE_PHASE.PREFLIGHT,
 					})
-					this.emitClineBalanceError(errorMessage)
+					if (!errorAlreadySurfaced) {
+						this.emitClineBalanceError(errorMessage)
+					}
 				} else {
 					this.captureProviderFailure({
 						sessionId,
@@ -413,18 +421,20 @@ export class Controller {
 						errorType: PROVIDER_FAILURE_ERROR_TYPE.SEND_ERROR,
 						failurePhase: PROVIDER_FAILURE_PHASE.STREAMING,
 					})
-					this.messages.emitSessionEvents(
-						[
-							{
-								ts: Date.now(),
-								type: "say",
-								say: "error",
-								text: `Agent error: ${errorMessage}`,
-								partial: false,
-							},
-						],
-						{ type: "status", payload: { sessionId, status: "error" } },
-					)
+					if (!errorAlreadySurfaced) {
+						this.messages.emitSessionEvents(
+							[
+								{
+									ts: Date.now(),
+									type: "say",
+									say: "error",
+									text: `Agent error: ${errorMessage}`,
+									partial: false,
+								},
+							],
+							{ type: "status", payload: { sessionId, status: "error" } },
+						)
+					}
 				}
 				this.postStateToWebview().catch(() => {})
 			},

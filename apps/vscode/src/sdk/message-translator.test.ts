@@ -1096,14 +1096,19 @@ describe("translateSessionEvent — agent_event error", () => {
 		// First message: api_req_started with streamingFailedMessage
 		expect(result.messages[0].say).toBe("api_req_started")
 		const apiReqInfo = JSON.parse(result.messages[0].text!)
-		expect(apiReqInfo.streamingFailedMessage).toBe("API rate limit exceeded")
+		const streamingFailed = JSON.parse(apiReqInfo.streamingFailedMessage)
+		expect(streamingFailed.message).toBe("API rate limit exceeded")
+		expect(streamingFailed.providerId).toBe("cline")
 		expect(result.messages[0].partial).toBe(false)
 		// Second message: ask api_req_failed
 		expect(result.messages[1].type).toBe("ask")
 		expect(result.messages[1].ask).toBe("api_req_failed")
-		expect(result.messages[1].text).toBe("API rate limit exceeded")
+		const failedPayload = JSON.parse(result.messages[1].text!)
+		expect(failedPayload.message).toBe("API rate limit exceeded")
 		expect(result.messages[1].partial).toBe(false)
 		expect(result.turnComplete).toBe(true)
+		// The error outcome is recorded so turn end resolves to the "error" phase
+		expect(state.wasErrorSeen()).toBe(true)
 	})
 
 	it("reshapes insufficient_credits error into ClineError-compatible format", () => {
@@ -1286,7 +1291,9 @@ describe("translateSessionEvent — agent_event error", () => {
 
 		const result = translateSessionEvent(event, state)
 		expect(result.messages).toHaveLength(2)
-		expect(result.messages[1].text).toBe(message)
+		const parsed = JSON.parse(result.messages[1].text!)
+		expect(parsed.message).toBe(message)
+		expect(parsed.providerId).toBe("cline-pass")
 	})
 
 	it("rewrites Anthropic bare 'model: <id>' 404 into an actionable message", () => {
@@ -1348,11 +1355,13 @@ describe("translateSessionEvent — agent_event error", () => {
 
 		const result = translateSessionEvent(event, state)
 		const failedText = result.messages[1].text!
-		expect(failedText).toBe(rawMessage)
+		const parsed = JSON.parse(failedText)
+		expect(parsed.message).toBe(rawMessage)
+		expect(parsed.code).toBeUndefined()
 		expect(failedText).not.toContain("API Configuration settings")
 	})
 
-	it("leaves an auth error mentioning a model untouched", () => {
+	it("classifies an auth error mentioning a model without rewriting the message", () => {
 		const state = new MessageTranslatorState()
 		const rawMessage = "Invalid API key for model gpt-4"
 		const event: CoreSessionEvent = {
@@ -1368,8 +1377,79 @@ describe("translateSessionEvent — agent_event error", () => {
 
 		const result = translateSessionEvent(event, state)
 		const failedText = result.messages[1].text!
-		expect(failedText).toBe(rawMessage)
+		const parsed = JSON.parse(failedText)
+		expect(parsed.message).toBe(rawMessage)
+		expect(parsed.code).toBe("invalid_api_key")
 		expect(failedText).not.toContain("API Configuration settings")
+	})
+
+	it("summarizes an HTML error page and keeps the raw payload in details", () => {
+		const state = new MessageTranslatorState(undefined, () => "openai-compat")
+		const html = `<!DOCTYPE html>
+<html>
+<head><title>500 Internal Server Error</title></head>
+<body><h1>Internal Server Error</h1><address>proxy/1.0 at 127.0.0.1 Port 8788</address></body>
+</html>`
+		const event: CoreSessionEvent = {
+			type: "agent_event",
+			payload: {
+				sessionId: "session-1",
+				event: {
+					type: "error",
+					error: { message: html },
+				} as AgentEvent,
+			},
+		}
+
+		const result = translateSessionEvent(event, state)
+		const parsed = JSON.parse(result.messages[1].text!)
+		expect(parsed.message).toBe("The provider returned an HTML error page: 500 Internal Server Error")
+		expect(parsed.code).toBe("provider_server_error")
+		expect(parsed.providerId).toBe("openai-compat")
+		expect(parsed.details.raw).toBe(html)
+	})
+
+	it("classifies connection errors and collapses repeated cause text", () => {
+		const state = new MessageTranslatorState(undefined, () => "openrouter")
+		const event: CoreSessionEvent = {
+			type: "agent_event",
+			payload: {
+				sessionId: "session-1",
+				event: {
+					type: "error",
+					error: {
+						message: "Cannot connect to API: getaddrinfo ENOTFOUND host: getaddrinfo ENOTFOUND host (ENOTFOUND)",
+					},
+				} as AgentEvent,
+			},
+		}
+
+		const result = translateSessionEvent(event, state)
+		const parsed = JSON.parse(result.messages[1].text!)
+		expect(parsed.message).toBe("Cannot connect to API: getaddrinfo ENOTFOUND host (ENOTFOUND)")
+		expect(parsed.code).toBe("connection_error")
+		expect(parsed.providerId).toBe("openrouter")
+	})
+
+	it("rewrites a bare 'Not Found' body into model-not-found guidance", () => {
+		const state = new MessageTranslatorState(undefined, () => "openai-compat")
+		const event: CoreSessionEvent = {
+			type: "agent_event",
+			payload: {
+				sessionId: "session-1",
+				event: {
+					type: "error",
+					error: { message: "Not Found" },
+				} as AgentEvent,
+			},
+		}
+
+		const result = translateSessionEvent(event, state)
+		const parsed = JSON.parse(result.messages[1].text!)
+		expect(parsed.code).toBe("model_not_found")
+		expect(parsed.message).toContain("Not Found")
+		expect(parsed.message).toContain("API Configuration settings")
+		expect(parsed.details.raw).toBe("Not Found")
 	})
 })
 

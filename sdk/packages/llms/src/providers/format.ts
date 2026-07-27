@@ -1,3 +1,30 @@
+/**
+ * Detects response bodies that are HTML documents (e.g. a gateway's 500/502
+ * error page) so they can be summarized instead of dumped verbatim into chat.
+ */
+function looksLikeHtmlDocument(text: string): boolean {
+	const head = text.trimStart().slice(0, 256).toLowerCase();
+	return head.startsWith("<!doctype html") || head.startsWith("<html");
+}
+
+/**
+ * Collapse an HTML error page into a one-line description, preferring the
+ * document title or first heading (e.g. "Internal Server Error").
+ */
+function summarizeHtmlErrorPage(html: string): string {
+	const stripTags = (fragment: string): string =>
+		fragment
+			.replace(/<[^>]*>/g, " ")
+			.replace(/\s+/g, " ")
+			.trim();
+	const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+	const heading = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+	const label = stripTags(title ?? heading ?? "");
+	return label
+		? `The provider returned an HTML error page: ${label}`
+		: "The provider returned an HTML error page instead of an API response.";
+}
+
 export function extractErrorMessage(error: unknown): string {
 	// Generic SDK wrappers carry no signal of their own — when present we prefer
 	// the underlying cause/detail (e.g. AI SDK's AI_NoOutputGeneratedError).
@@ -56,7 +83,16 @@ export function extractErrorMessage(error: unknown): string {
 			try {
 				return extractStructuredMessage(JSON.parse(value));
 			} catch {
-				return value.trim() || undefined;
+				const trimmed = value.trim();
+				if (!trimmed) {
+					return undefined;
+				}
+				// Never surface a whole HTML document (gateway/proxy error pages)
+				// as the error message — summarize it instead.
+				if (looksLikeHtmlDocument(trimmed)) {
+					return summarizeHtmlErrorPage(trimmed);
+				}
+				return trimmed;
 			}
 		}
 		if (typeof value !== "object") {
@@ -84,10 +120,6 @@ export function extractErrorMessage(error: unknown): string {
 			// Otherwise preserve the wrapper message alongside its cause, e.g.
 			// "fetch failed: SocketError: other side closed (UND_ERR_SOCKET)".
 			if (causeMessage && message && causeMessage !== message) {
-				const causeName =
-					cause instanceof Error && cause.name && cause.name !== "Error"
-						? `${cause.name}: `
-						: "";
 				const causeCode =
 					cause && typeof cause === "object" && "code" in cause
 						? (cause as { code?: unknown }).code
@@ -95,6 +127,18 @@ export function extractErrorMessage(error: unknown): string {
 				const codeSuffix =
 					typeof causeCode === "string" && causeCode.trim()
 						? ` (${causeCode})`
+						: "";
+				// Some wrappers already embed the cause in their own message
+				// (e.g. undici's "Cannot connect to API: getaddrinfo ENOTFOUND
+				// host") — appending the cause again would just repeat it.
+				if (message.includes(causeMessage)) {
+					return codeSuffix && !message.includes(codeSuffix)
+						? `${message}${codeSuffix}`
+						: message;
+				}
+				const causeName =
+					cause instanceof Error && cause.name && cause.name !== "Error"
+						? `${cause.name}: `
 						: "";
 				return `${message}: ${causeName}${causeMessage}${codeSuffix}`;
 			}
@@ -119,9 +163,6 @@ export function extractErrorMessage(error: unknown): string {
 	};
 
 	const structuredMessage = extractStructuredMessage(error);
-	if (structuredMessage) {
-		return structuredMessage;
-	}
-
-	return String(error);
+	const result = structuredMessage ?? String(error);
+	return looksLikeHtmlDocument(result) ? summarizeHtmlErrorPage(result) : result;
 }

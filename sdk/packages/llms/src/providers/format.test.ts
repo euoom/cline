@@ -63,6 +63,45 @@ describe("extractErrorMessage", () => {
 			}),
 		).toBe("Missing upstream API key");
 	});
+
+	it("does not repeat the cause when the wrapper message already contains it", () => {
+		const dnsError = Object.assign(
+			new Error("getaddrinfo ENOTFOUND host"),
+			{ code: "ENOTFOUND" },
+		);
+
+		expect(
+			extractErrorMessage(
+				new Error("Cannot connect to API: getaddrinfo ENOTFOUND host", {
+					cause: dnsError,
+				}),
+			),
+		).toBe("Cannot connect to API: getaddrinfo ENOTFOUND host (ENOTFOUND)");
+	});
+
+	it("summarizes HTML error pages instead of dumping the document", () => {
+		const html = `<!DOCTYPE html>
+<html>
+<head><title>500 Internal Server Error</title></head>
+<body>
+<h1>Internal Server Error</h1>
+<p>The server encountered an internal error.</p>
+<address>proxy/1.0 at 127.0.0.1 Port 8788</address>
+</body>
+</html>`;
+
+		expect(extractErrorMessage({ responseBody: html })).toBe(
+			"The provider returned an HTML error page: 500 Internal Server Error",
+		);
+		expect(extractErrorMessage(new Error(html))).toBe(
+			"The provider returned an HTML error page: 500 Internal Server Error",
+		);
+		expect(
+			extractErrorMessage(new Error("<html><body>Bad gateway</body></html>")),
+		).toBe(
+			"The provider returned an HTML error page instead of an API response.",
+		);
+	});
 });
 
 describe("ClineNotSubscribedError", () => {

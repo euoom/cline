@@ -192,9 +192,15 @@ export class ClineError extends Error {
 			return ClineErrorType.ClinePassLimit
 		}
 
+		// Codes classified upstream (reshapeErrorForWebview) that must not fall
+		// into the status-range auth check below (e.g. a 404 model_not_found).
+		if (code === "model_not_found" || code === "connection_error" || code === "provider_server_error") {
+			return undefined
+		}
+
 		// Check auth errors
 		const isAuthStatus = status !== undefined && status > 400 && status < 429
-		if (code === "ERR_BAD_REQUEST" || err instanceof AuthInvalidTokenError || isAuthStatus) {
+		if (code === "ERR_BAD_REQUEST" || code === "invalid_api_key" || err instanceof AuthInvalidTokenError || isAuthStatus) {
 			return ClineErrorType.Auth
 		}
 
@@ -204,7 +210,12 @@ export class ClineError extends Error {
 
 		if (message) {
 			// Check for specific error codes/messages if applicable
-			const authErrorRegex = [/(?:in)?valid[-_ ]?(?:api )?(?:token|key)/i, /authentication[-_ ]?failed/i, /unauthorized/i]
+			const authErrorRegex = [
+				/(?:in)?valid[-_ ]?(?:api )?(?:token|key)/i,
+				/api[-_ ]?key[^.,;]*\b(?:invalid|incorrect|missing|expired|not (?:found|valid))/i,
+				/authentication[-_ ]?failed/i,
+				/unauthorized/i,
+			]
 			if (message?.includes(CLINE_ACCOUNT_AUTH_ERROR_MESSAGE) || authErrorRegex.some((regex) => regex.test(message))) {
 				return ClineErrorType.Auth
 			}

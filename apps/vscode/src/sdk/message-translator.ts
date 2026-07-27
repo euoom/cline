@@ -310,6 +310,19 @@ export class MessageTranslatorState {
 		return this.attemptCompletionSeen
 	}
 
+	/** Whether a provider/agent error surfaced in this turn (ask:"api_req_failed" emitted) */
+	private errorSeen = false
+
+	/** Mark that this turn surfaced an error */
+	setErrorSeen(): void {
+		this.errorSeen = true
+	}
+
+	/** Check if this turn surfaced an error — drives the "error" turn phase (Retry / New Task) */
+	wasErrorSeen(): boolean {
+		return this.errorSeen
+	}
+
 	// -----------------------------------------------------------------------
 	// spawn_agent tracking — aggregates parallel spawn_agent tool calls into
 	// the rich SubagentStatusRow UI (use_subagents + subagent messages).
@@ -431,12 +444,14 @@ export class MessageTranslatorState {
 	}
 
 	/**
-	 * Clear turn-outcome signals (`attemptCompletionSeen`). Called at a new user turn / task
-	 * boundary so each turn's phase is computed fresh; it is intentionally separate from the
-	 * per-iteration `reset()` so the completion signal persists across the iterations of one turn.
+	 * Clear turn-outcome signals (`attemptCompletionSeen`, `errorSeen`). Called at a new user
+	 * turn / task boundary so each turn's phase is computed fresh; it is intentionally separate
+	 * from the per-iteration `reset()` so the outcome signals persist across the iterations of
+	 * one turn.
 	 */
 	clearTurnOutcome(): void {
 		this.attemptCompletionSeen = false
+		this.errorSeen = false
 	}
 }
 
@@ -1571,6 +1586,10 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 				break
 			}
 
+			// Record the error outcome so turn end resolves to the "error" phase
+			// (footer shows Retry / Start New Task) instead of awaiting_followup.
+			state.setErrorSeen()
+
 			// Serialize the error message for the webview's ErrorRow to parse.
 			// The webview uses ClineError.parse() on the `api_req_failed` text to
 			// detect special error types (insufficient credits, spend limit, auth,
@@ -2102,10 +2121,107 @@ function describeModelNotFoundError(rawMessage: string): string | undefined {
 	return undefined
 }
 
+/** Text signatures of authentication failures across providers (e.g. Anthropic's
+ * "API key is invalid.", OpenRouter's "User not found.", generic 401 phrasing). */
+const AUTH_ERROR_TEXT_PATTERNS = [
+	/api[-_ ]?key[^.,;]*\b(?:invalid|incorrect|missing|expired|not (?:found|valid))/i,
+	/(?:invalid|incorrect|missing|expired|bad) (?:x-)?api[-_ ]?key/i,
+	/invalid (?:bearer )?token/i,
+	/^\s*user not found\.?\s*$/i,
+	/authentication[-_ ]?(?:failed|error)/i,
+	/unauthorized/i,
+	/no auth credentials/i,
+]
+
+/** Text signatures of transport/connection failures (DNS, refused, reset, socket). */
+const CONNECTION_ERROR_TEXT_PATTERNS = [
+	/\bENOTFOUND\b/,
+	/\bECONNREFUSED\b/,
+	/\bECONNRESET\b/,
+	/\bETIMEDOUT\b/,
+	/\bEAI_AGAIN\b/,
+	/\bEPIPE\b/,
+	/\bUND_ERR/,
+	/fetch failed/i,
+	/cannot connect to (?:the )?api/i,
+	/socket ?error/i,
+	/other side closed/i,
+	/network error/i,
+]
+
+function looksLikeHtmlDocument(text: string): boolean {
+	const head = text.trimStart().slice(0, 256).toLowerCase()
+	return head.startsWith("<!doctype html") || head.startsWith("<html")
+}
+
+/** Collapse an HTML error page (proxy/gateway 5xx pages) into a one-line summary. */
+function summarizeHtmlErrorPage(html: string): string {
+	const stripTags = (fragment: string): string =>
+		fragment
+			.replace(/<[^>]*>/g, " ")
+			.replace(/\s+/g, " ")
+			.trim()
+	const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]
+	const heading = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]
+	const label = stripTags(title ?? heading ?? "")
+	return label
+		? `The provider returned an HTML error page: ${label}`
+		: "The provider returned an HTML error page instead of an API response."
+}
+
+/**
+ * Collapse wrapper messages that repeat their cause, e.g.
+ * "Cannot connect to API: getaddrinfo ENOTFOUND host: getaddrinfo ENOTFOUND host (ENOTFOUND)"
+ * → "Cannot connect to API: getaddrinfo ENOTFOUND host (ENOTFOUND)".
+ */
+function collapseRepeatedCause(message: string): string {
+	const codeMatch = message.match(/\s*\((\w[\w-]*)\)\s*$/)
+	const codeSuffix = codeMatch ? ` (${codeMatch[1]})` : ""
+	const body = codeMatch ? message.slice(0, codeMatch.index) : message
+	const separator = body.lastIndexOf(": ")
+	if (separator > 0) {
+		const head = body.slice(0, separator)
+		const tail = body.slice(separator + 2).trim()
+		if (tail && head.endsWith(tail)) {
+			return `${head}${codeSuffix}`
+		}
+	}
+	return message
+}
+
+/**
+ * Normalize a plain-text provider error into a readable message plus a
+ * classification code the webview's ErrorRow understands. Keeps the original
+ * text so it can be offered as expandable details when it differs.
+ */
+function normalizePlainTextError(rawMessage: string): { message: string; code?: string; raw?: string } {
+	const original = rawMessage.trim() || "Unknown error"
+	let message = collapseRepeatedCause(original)
+	let code: string | undefined
+
+	if (looksLikeHtmlDocument(message)) {
+		message = summarizeHtmlErrorPage(message)
+		code = "provider_server_error"
+	} else if (AUTH_ERROR_TEXT_PATTERNS.some((pattern) => pattern.test(message))) {
+		code = "invalid_api_key"
+	} else if (CONNECTION_ERROR_TEXT_PATTERNS.some((pattern) => pattern.test(message))) {
+		code = "connection_error"
+	} else if (/^\s*not[_ ]?found\.?\s*$/i.test(message)) {
+		// Bare "Not Found" — almost always a wrong or retired model id.
+		message = `The provider returned "Not Found" for this request. ${MODEL_NOT_FOUND_GUIDANCE}`
+		code = "model_not_found"
+	}
+
+	return { message, code, raw: original !== message ? original : undefined }
+}
+
 /**
  * Reshape an SDK error into the serialized ClineError JSON the webview's
  * ErrorRow expects (`code`, `providerId`, `details`), extracting structured
  * info from the error message when present and falling back to raw text.
+ *
+ * Always returns serialized JSON that includes `providerId` so the webview can
+ * name the provider and classify the failure — never a bare unstructured string.
  */
 export function reshapeErrorForWebview(
 	error: { message?: string; status?: number; code?: string },
@@ -2172,9 +2288,22 @@ export function reshapeErrorForWebview(
 		}
 		const notFoundMessage = describeModelNotFoundError(rawMessage)
 		if (notFoundMessage) {
-			return notFoundMessage
+			return JSON.stringify({
+				message: notFoundMessage,
+				status: error.status,
+				code: error.code ?? "model_not_found",
+				providerId,
+			})
 		}
-		return rawMessage
+
+		const normalized = normalizePlainTextError(rawMessage)
+		return JSON.stringify({
+			message: normalized.message,
+			status: error.status,
+			code: error.code ?? normalized.code,
+			providerId,
+			details: normalized.raw ? { raw: normalized.raw } : undefined,
+		})
 	}
 
 	// Detect insufficient credits (402) — needs code + current_balance for
@@ -2213,7 +2342,11 @@ export function reshapeErrorForWebview(
 		})
 	}
 
-	// For other structured errors, pass through the parsed JSON so
-	// ClineError.parse() can still extract what it can.
-	return JSON.stringify(parsed)
+	// For other structured errors, pass through the parsed JSON (stamped with
+	// the provider) so ClineError.parse() can still extract what it can.
+	return JSON.stringify({
+		...parsed,
+		message: typeof parsed.message === "string" && parsed.message ? parsed.message : rawMessage,
+		providerId: typeof parsed.providerId === "string" && parsed.providerId ? parsed.providerId : providerId,
+	})
 }

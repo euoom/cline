@@ -23,9 +23,12 @@ vi.mock("@/context/ClineAuthContext", () => ({
 	handleSignOut: vi.fn(),
 }))
 
+const mockNavigateToSettings = vi.hoisted(() => vi.fn())
+
 vi.mock("@/context/ExtensionStateContext", () => ({
 	useExtensionState: () => ({
 		apiConfiguration: mockApiConfiguration,
+		navigateToSettings: mockNavigateToSettings,
 	}),
 }))
 
@@ -144,6 +147,7 @@ describe("ErrorRow", () => {
 						current_balance: 0,
 						message: "Not enough credits available",
 					},
+					message: "Not enough credits available",
 				},
 			}
 
@@ -153,7 +157,9 @@ describe("ErrorRow", () => {
 			render(<ErrorRow apiRequestFailedMessage="Insufficient credits error" errorType="error" message={mockMessage} />)
 
 			expect(screen.queryByTestId("credit-limit-error")).not.toBeInTheDocument()
-			expect(screen.getByText(/\[zai\]/)).toBeInTheDocument()
+			expect(screen.getByTestId("error-title")).toHaveTextContent("Insufficient credits")
+			expect(screen.getByText("(zai)")).toBeInTheDocument()
+			expect(screen.getByText("Not enough credits available")).toBeInTheDocument()
 		})
 
 		it("renders rate limit error with request ID", async () => {
@@ -380,6 +386,133 @@ describe("ErrorRow", () => {
 			render(<ErrorRow errorType="error" message={mockMessage} />)
 
 			expect(screen.getByText("Test error message")).toBeInTheDocument()
+		})
+
+		it("renders an auth error card with settings affordance for non-Cline providers", async () => {
+			const mockClineError = {
+				message: "API key is invalid.",
+				providerId: "anthropic",
+				isErrorType: vi.fn((type) => type === "auth"),
+				_error: {
+					code: "invalid_api_key",
+					providerId: "anthropic",
+					message: "API key is invalid.",
+				},
+			}
+
+			const { ClineError } = await import("../../../../src/services/error/ClineError")
+			vi.mocked(ClineError.parse).mockReturnValue(mockClineError as any)
+
+			render(<ErrorRow apiRequestFailedMessage="API key is invalid." errorType="error" message={mockMessage} />)
+
+			expect(screen.getByTestId("error-title")).toHaveTextContent("Authentication error")
+			expect(screen.getByText("(anthropic)")).toBeInTheDocument()
+			expect(screen.getByText("API key is invalid.")).toBeInTheDocument()
+			expect(screen.getByText(/Check that your anthropic API key is valid/)).toBeInTheDocument()
+			expect(screen.queryByText("Sign in to Cline")).not.toBeInTheDocument()
+
+			fireEvent.click(screen.getByText("Open API settings"))
+			expect(mockNavigateToSettings).toHaveBeenCalledWith("api-config")
+		})
+
+		it("classifies connection errors and offers guidance", async () => {
+			const message = "Cannot connect to API: getaddrinfo ENOTFOUND host (ENOTFOUND)"
+			const mockClineError = {
+				message,
+				providerId: "openrouter",
+				isErrorType: vi.fn(() => false),
+				_error: {
+					code: "connection_error",
+					providerId: "openrouter",
+					message,
+				},
+			}
+
+			const { ClineError } = await import("../../../../src/services/error/ClineError")
+			vi.mocked(ClineError.parse).mockReturnValue(mockClineError as any)
+
+			render(<ErrorRow apiRequestFailedMessage={message} errorType="error" message={mockMessage} />)
+
+			expect(screen.getByTestId("error-title")).toHaveTextContent("Connection error")
+			expect(screen.getByText(/couldn't reach the openrouter API/)).toBeInTheDocument()
+		})
+
+		it("summarizes provider server errors and reveals the raw payload behind a details toggle", async () => {
+			const summarized = "The provider returned an HTML error page: 500 Internal Server Error"
+			const rawHtml = "<!DOCTYPE html><html><head><title>500 Internal Server Error</title></head></html>"
+			const mockClineError = {
+				message: summarized,
+				providerId: "openai",
+				isErrorType: vi.fn(() => false),
+				_error: {
+					code: "provider_server_error",
+					providerId: "openai",
+					message: summarized,
+					details: { raw: rawHtml },
+				},
+			}
+
+			const { ClineError } = await import("../../../../src/services/error/ClineError")
+			vi.mocked(ClineError.parse).mockReturnValue(mockClineError as any)
+
+			render(<ErrorRow apiRequestFailedMessage={summarized} errorType="error" message={mockMessage} />)
+
+			expect(screen.getByTestId("error-title")).toHaveTextContent("Provider server error")
+			expect(screen.getByText(summarized)).toBeInTheDocument()
+			expect(screen.getByText(/usually temporary/)).toBeInTheDocument()
+			// Raw payload is hidden until the user expands details
+			expect(screen.queryByText(/<!DOCTYPE html>/)).not.toBeInTheDocument()
+
+			fireEvent.click(screen.getByText("Show details"))
+			expect(screen.getByText(/<!DOCTYPE html>/)).toBeInTheDocument()
+		})
+
+		it("classifies model-not-found errors", async () => {
+			const message = 'The provider returned "Not Found" for this request. Switch to a different model, then retry.'
+			const mockClineError = {
+				message,
+				providerId: "openai-compat",
+				isErrorType: vi.fn(() => false),
+				_error: {
+					code: "model_not_found",
+					providerId: "openai-compat",
+					message,
+				},
+			}
+
+			const { ClineError } = await import("../../../../src/services/error/ClineError")
+			vi.mocked(ClineError.parse).mockReturnValue(mockClineError as any)
+
+			render(<ErrorRow apiRequestFailedMessage={message} errorType="error" message={mockMessage} />)
+
+			expect(screen.getByTestId("error-title")).toHaveTextContent("Model not found")
+			expect(screen.getByText("Open API settings")).toBeInTheDocument()
+		})
+
+		it("classifies rate limit errors with a title", async () => {
+			const mockClineError = {
+				message: "Rate limit reached for requests. Please try again in 20s.",
+				providerId: "openai",
+				isErrorType: vi.fn((type) => type === "rateLimit"),
+				_error: {
+					providerId: "openai",
+					message: "Rate limit reached for requests. Please try again in 20s.",
+				},
+			}
+
+			const { ClineError } = await import("../../../../src/services/error/ClineError")
+			vi.mocked(ClineError.parse).mockReturnValue(mockClineError as any)
+
+			render(
+				<ErrorRow
+					apiRequestFailedMessage="Rate limit reached for requests. Please try again in 20s."
+					errorType="error"
+					message={mockMessage}
+				/>,
+			)
+
+			expect(screen.getByTestId("error-title")).toHaveTextContent("Rate limited")
+			expect(screen.getByText(/throttling requests/)).toBeInTheDocument()
 		})
 	})
 })
