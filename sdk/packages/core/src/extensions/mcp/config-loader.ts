@@ -13,7 +13,7 @@ import {
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { BasicLogger } from "@cline/shared";
-import { resolveMcpTimeoutSeconds } from "@cline/shared";
+import { clampMcpTimeoutSeconds } from "@cline/shared";
 import { resolveMcpSettingsPath } from "@cline/shared/storage";
 import { z } from "zod";
 import type {
@@ -26,12 +26,16 @@ import type {
 const stringRecordSchema = z.record(z.string(), z.string());
 const metadataSchema = z.record(z.string(), z.unknown());
 
-// Preserve omission for the fast stdio initialize probe. Every present value
-// uses the shared resolver, so malformed input falls back and finite numbers
-// clamp without rejecting otherwise valid servers in the settings file.
+// Preserve omission for the fast stdio initialize probe: only a valid finite
+// number counts as a configured timeout. Malformed values are treated as
+// omitted — request timeouts still resolve to the shared default downstream —
+// and finite numbers clamp without rejecting otherwise valid servers in the
+// settings file.
 const timeoutFieldSchema = z.preprocess(
 	(value) =>
-		value === undefined ? undefined : resolveMcpTimeoutSeconds(value),
+		typeof value === "number" && Number.isFinite(value)
+			? clampMcpTimeoutSeconds(value)
+			: undefined,
 	z.number().optional(),
 );
 const oauthStateSchema = z

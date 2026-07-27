@@ -159,7 +159,7 @@ describe("mcp config loader", () => {
 		expect(byName.get("tooSmall")?.timeoutSeconds).toBe(1);
 	});
 
-	it("defaults malformed timeout values without rejecting valid sibling servers", async () => {
+	it("treats malformed timeout values as omitted without rejecting valid sibling servers", async () => {
 		const tempRoot = await mkdtemp(join(tmpdir(), "core-mcp-config-loader-"));
 		tempRoots.push(tempRoot);
 		const filePath = join(tempRoot, "cline_mcp_settings.json");
@@ -182,9 +182,11 @@ describe("mcp config loader", () => {
 
 		const registrations = resolveMcpServerRegistrations({ filePath });
 		expect(registrations).toHaveLength(2);
+		// Omission (not an explicit default) keeps the fast stdio initialize
+		// probe for servers the user never intentionally configured.
 		expect(
 			registrations.map((registration) => registration.timeoutSeconds),
-		).toEqual([60, 60]);
+		).toEqual([undefined, undefined]);
 	});
 
 	it("registers loaded servers with an mcp manager", async () => {

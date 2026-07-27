@@ -1772,8 +1772,11 @@ export class McpHub {
 	 * Compute a fingerprint of the current tool list.
 	 *
 	 * The fingerprint is a sorted, deterministic string of
-	 * "serverName:toolName" pairs for all connected, non-disabled servers.
-	 * Changes to this fingerprint indicate that the agent's available
+	 * "serverName@timeoutMs:toolName" entries for all connected, non-disabled
+	 * servers. The per-server timeout is included because the session bakes it
+	 * into each MCP tool wrapper (see createVscodeExtraTools), so a
+	 * timeout-only change must rebuild the session's tools just like a tool
+	 * change. Changes to this fingerprint indicate that the agent's available
 	 * tool set has changed and a session restart may be needed.
 	 */
 	computeToolFingerprint(): string {
@@ -1782,8 +1785,9 @@ export class McpHub {
 			if (conn.server.disabled || conn.server.status !== "connected") {
 				continue
 			}
+			const timeoutMs = resolveMcpServerTimeoutMs(conn.server.config)
 			for (const tool of conn.server.tools ?? []) {
-				entries.push(`${conn.server.name}:${tool.name}`)
+				entries.push(`${conn.server.name}@${timeoutMs}:${tool.name}`)
 			}
 		}
 		entries.sort()
