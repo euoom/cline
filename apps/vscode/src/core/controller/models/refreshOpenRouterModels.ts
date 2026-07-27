@@ -151,7 +151,9 @@ async function fetchAndCacheModels(controller: Controller): Promise<Record<strin
 					case "anthropic/claude-sonnet-4.5":
 					case "anthropic/claude-4.5-sonnet":
 					case "anthropic/claude-sonnet-4":
-						// NOTE: we artificially restrict the context window to 200k to keep costs low for users, and have a :1m model variant created below for users that want to use the full 1m.
+						// NOTE: we artificially restrict the context window to 200k to keep costs low for users (Anthropic bills >200k
+						// input at premium long-context rates). Must stay in sync with the SDK catalog policy in
+						// @cline/llms (capOpenRouterAnthropicContextWindows), which the task header and auto-compaction read from.
 						modelInfo.contextWindow = 200_000
 						modelInfo.supportsPromptCache = true
 						modelInfo.cacheWritesPrice = 3.75
@@ -171,13 +173,13 @@ async function fetchAndCacheModels(controller: Controller): Promise<Record<strin
 						break
 					case "anthropic/claude-opus-4.6":
 					case "anthropic/claude-opus-4.7":
-						modelInfo.contextWindow = 200_000 // restrict to 200k, 1m variant created below
+						modelInfo.contextWindow = 200_000 // restrict to 200k, see NOTE above
 						modelInfo.supportsPromptCache = true
 						modelInfo.cacheWritesPrice = 6.25
 						modelInfo.cacheReadsPrice = 0.5
 						break
 					case "anthropic/claude-fable-5":
-						modelInfo.contextWindow = 200_000 // restrict to 200k, 1m variant created below
+						modelInfo.contextWindow = 200_000 // restrict to 200k, see NOTE above
 						modelInfo.supportsPromptCache = true
 						modelInfo.inputPrice = 10
 						modelInfo.outputPrice = 50

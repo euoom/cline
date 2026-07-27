@@ -91,6 +91,12 @@ forwarding that limit only to wire API surfaces that support it.
 The exact request-limit policy belongs in the provider/gateway/core request
 path, not in generated catalog data.
 
+Product-level model-info policy (for example the OpenRouter Anthropic 200K
+context cap in `../providers/openrouter-models.ts`) is applied at the runtime
+access boundary — `catalog.generated-access.ts` for the bundled catalog and
+`fetchLiveProviderModels` for live data — so the generated file and the
+models.dev normalizers keep provider-reported values.
+
 ## Do Not Invent Output Limits
 
 The catalog generator should not turn ambiguous provider metadata into a new

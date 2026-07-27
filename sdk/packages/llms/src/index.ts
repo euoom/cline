@@ -11,6 +11,7 @@ export type {
 } from "./models";
 export {
 	CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT,
+	capOpenRouterAnthropicContextWindows,
 	fetchLiveProviderModels,
 	fetchModelsDevProviderModels,
 	filterOpenAICodexModels,
@@ -25,6 +26,7 @@ export {
 	hasProvider,
 	isCanonicalModelIdForAliasRules,
 	MODEL_COLLECTIONS_BY_PROVIDER_ID,
+	OPENROUTER_ANTHROPIC_CONTEXT_WINDOW_CAP,
 	preferCanonicalModelIds,
 	registerModel,
 	registerProvider,

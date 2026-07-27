@@ -40,3 +40,7 @@ export {
 	CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT,
 	filterOpenAICodexModels,
 } from "./providers/openai-codex-models";
+export {
+	capOpenRouterAnthropicContextWindows,
+	OPENROUTER_ANTHROPIC_CONTEXT_WINDOW_CAP,
+} from "./providers/openrouter-models";

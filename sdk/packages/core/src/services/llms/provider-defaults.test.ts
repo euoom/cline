@@ -24,6 +24,66 @@ describe("resolveProviderConfig", () => {
 		expect(Object.keys(resolved?.knownModels ?? {}).length).toBeGreaterThan(0);
 	});
 
+	it("caps bundled OpenRouter anthropic models to the standard context window", async () => {
+		const resolved = await resolveProviderConfig("openrouter");
+
+		expect(
+			resolved?.knownModels?.["anthropic/claude-sonnet-4.5"],
+		).toMatchObject({
+			contextWindow: 200_000,
+			maxInputTokens: 200_000,
+		});
+	});
+
+	it("caps live OpenRouter anthropic models to the standard context window", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				return new Response(
+					JSON.stringify({
+						openrouter: {
+							models: {
+								"anthropic/claude-sonnet-4.5": {
+									name: "Claude Sonnet 4.5",
+									tool_call: true,
+									limit: { context: 1_000_000, output: 64_000 },
+								},
+							},
+						},
+					}),
+					{
+						status: 200,
+						headers: { "content-type": "application/json" },
+					},
+				);
+			}),
+		);
+
+		const resolved = await resolveProviderConfig("openrouter", {
+			loadLatestOnInit: true,
+			failOnError: false,
+			cacheTtlMs: 0,
+		});
+
+		expect(
+			resolved?.knownModels?.["anthropic/claude-sonnet-4.5"],
+		).toMatchObject({
+			contextWindow: 200_000,
+			maxInputTokens: 200_000,
+		});
+	});
+
+	it("caps OpenRouter-backed Cline provider anthropic models", async () => {
+		const resolved = await resolveProviderConfig("cline");
+
+		expect(
+			resolved?.knownModels?.["anthropic/claude-sonnet-4.5"],
+		).toMatchObject({
+			contextWindow: 200_000,
+			maxInputTokens: 200_000,
+		});
+	});
+
 	it("uses catalog aliases when loading live models", async () => {
 		vi.stubGlobal(
 			"fetch",

@@ -1,3 +1,4 @@
+import { capOpenRouterAnthropicContextWindows } from "../providers/openrouter-models";
 import {
 	MODELS_DEV_BLOCKED_PROVIDER_IDS,
 	MODELS_DEV_CURRENT_BUILTIN_PROVIDER_KEYS,
@@ -403,6 +404,15 @@ export async function fetchLiveProviderModels(
 		),
 		fetchClineRecommendedModelsPayload(fetcher).catch(() => undefined),
 	]);
+	// Live catalog data feeding the runtime gets the same access policy as
+	// the generated catalog (see catalog.generated-access.ts). The
+	// normalizers above stay policy-free because they also feed the catalog
+	// generator, which must preserve provider-reported values.
+	if (providerModels.openrouter) {
+		providerModels.openrouter = capOpenRouterAnthropicContextWindows(
+			providerModels.openrouter,
+		);
+	}
 	const clineRecommended = clineRecommendedPayload
 		? normalizeClineRecommendedProviderModels(
 				clineRecommendedPayload,

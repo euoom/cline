@@ -654,6 +654,94 @@ describe("models-dev-catalog", () => {
 		});
 	});
 
+	it("caps live OpenRouter anthropic extended-context models and derived ClinePass models", async () => {
+		const fetcher = vi.fn(async (url: string) => {
+			if (url === "https://models.dev/api.json") {
+				return {
+					ok: true,
+					json: async () =>
+						({
+							openrouter: {
+								models: {
+									"anthropic/claude-sonnet-4.5": {
+										name: "Claude Sonnet 4.5",
+										tool_call: true,
+										limit: { context: 1_000_000, output: 64_000 },
+									},
+									"x-ai/grok-live": {
+										name: "Grok Live",
+										tool_call: true,
+										limit: { context: 1_000_000, output: 64_000 },
+									},
+								},
+							},
+						}) satisfies ModelsDevPayload,
+				};
+			}
+
+			return {
+				ok: true,
+				json: async () => ({
+					clinePass: [
+						{
+							id: "cline-pass/claude-sonnet-4.5",
+							name: "anthropic/claude-sonnet-4.5",
+						},
+					],
+				}),
+			};
+		});
+
+		const result = await fetchLiveProviderModels(
+			"https://models.dev/api.json",
+			fetcher as unknown as typeof fetch,
+		);
+
+		expect(result.openrouter?.["anthropic/claude-sonnet-4.5"]).toMatchObject({
+			contextWindow: 200_000,
+			maxInputTokens: 200_000,
+			maxTokens: 64_000,
+		});
+		expect(result.openrouter?.["x-ai/grok-live"]).toMatchObject({
+			contextWindow: 1_000_000,
+			maxInputTokens: 1_000_000,
+		});
+		expect(
+			result["cline-pass"]?.["cline-pass/claude-sonnet-4.5"],
+		).toMatchObject({
+			contextWindow: 200_000,
+			maxInputTokens: 200_000,
+		});
+	});
+
+	it("keeps provider-reported context windows on the catalog generator path", async () => {
+		const fetcher = vi.fn(async () => ({
+			ok: true,
+			json: async () =>
+				({
+					openrouter: {
+						models: {
+							"anthropic/claude-sonnet-4.5": {
+								name: "Claude Sonnet 4.5",
+								tool_call: true,
+								limit: { context: 1_000_000, output: 64_000 },
+							},
+						},
+					},
+				}) satisfies ModelsDevPayload,
+		}));
+
+		const result = await fetchModelsDevProviderModels(
+			"https://models.dev/api.json",
+			fetcher as unknown as typeof fetch,
+		);
+
+		expect(result.openrouter?.["anthropic/claude-sonnet-4.5"]).toMatchObject({
+			contextWindow: 1_000_000,
+			maxInputTokens: 1_000_000,
+		});
+	});
+
 	it("throws when models.dev request fails", async () => {
 		const fetcher = vi.fn(async () => ({
 			ok: false,
