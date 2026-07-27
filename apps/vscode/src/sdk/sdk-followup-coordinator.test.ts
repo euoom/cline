@@ -326,6 +326,30 @@ describe("SdkFollowupCoordinator", () => {
 		expect(options.onFollowUpAbandoned).toHaveBeenCalledOnce()
 	})
 
+	it("still sends the follow-up when the same task is re-opened with a fresh proxy during resume", async () => {
+		const task = makeTask("task-1")
+		const reloadedSameTask = makeTask("task-1")
+		const { coordinator, options } = makeCoordinator({ task })
+		options.sessions.startNewSession.mockImplementationOnce(async () => {
+			const sdkHost = { send: vi.fn() }
+			// showTaskWithId allocates a new proxy even for the same task id.
+			options.getTask.mockReturnValue(reloadedSameTask)
+			return { startResult: { sessionId: "task-1" }, sdkHost }
+		})
+
+		await coordinator.askResponse("continue")
+
+		expect(options.onFollowUpAbandoned).not.toHaveBeenCalled()
+		expect(options.sessions.endActiveSession).not.toHaveBeenCalled()
+		expect(options.sessions.fireAndForgetSend).toHaveBeenCalledWith(
+			expect.anything(),
+			"task-1",
+			"resolved: continue",
+			undefined,
+			undefined,
+		)
+	})
+
 	it("settles the turn phase when the task changes before the resume starts", async () => {
 		const task = makeTask("task-1")
 		const replacementTask = makeTask("task-2")

@@ -85,7 +85,7 @@ export class SdkFollowupCoordinator {
 		await this.options.runExclusive(async () => {
 			// Task navigation does not use the rebuild scheduler. Do not deliver a
 			// prompt submitted from one task into a task selected while we waited.
-			if (task && this.options.getTask() !== task) {
+			if (task && this.displayedTaskChanged(task)) {
 				await this.abandonFollowUp(
 					`askResponse: Task changed while waiting to resume ${task.taskId}; cancelling follow-up`,
 				)
@@ -147,7 +147,7 @@ export class SdkFollowupCoordinator {
 		try {
 			await this.resumeSessionFromTask(task, prompt, images, files)
 		} catch (error) {
-			if (this.options.getTask() !== task) {
+			if (this.displayedTaskChanged(task)) {
 				// Settle the pre-set streaming phase, but do not emit the stale
 				// failure into the newly displayed task's transcript.
 				await this.abandonFollowUp(`Suppressing resume failure for task no longer displayed: ${task.taskId}`)
@@ -189,7 +189,7 @@ export class SdkFollowupCoordinator {
 
 		const historyItem = await this.options.taskHistory.findHistoryItem(taskId)
 		const resumeStart = await prepareTaskResumeStartInput(this.options, taskId)
-		if (this.options.getTask() !== task) {
+		if (this.displayedTaskChanged(task)) {
 			await this.abandonFollowUp(`Task changed before resume start for ${taskId}; cancelling follow-up`)
 			return
 		}
@@ -201,7 +201,7 @@ export class SdkFollowupCoordinator {
 			interactive: true,
 		})
 
-		if (this.options.getTask() !== task) {
+		if (this.displayedTaskChanged(task)) {
 			await this.endStartedResume(sdkHost, startResult.sessionId)
 			await this.abandonFollowUp(`Task changed during resume start for ${taskId}; cancelled follow-up`)
 			return
@@ -212,7 +212,7 @@ export class SdkFollowupCoordinator {
 				historyItem.ts = Date.now()
 				historyItem.modelId = resumeStart.config.modelId
 				await this.options.taskHistory.updateTaskHistoryItem(historyItem)
-				if (this.options.getTask() !== task) {
+				if (this.displayedTaskChanged(task)) {
 					await this.endStartedResume(sdkHost, startResult.sessionId)
 					await this.abandonFollowUp(`Task changed while updating history for ${taskId}; cancelled follow-up`)
 					return
@@ -225,7 +225,7 @@ export class SdkFollowupCoordinator {
 					? `[TASK RESUMPTION] This task was interrupted. It may or may not be complete, so please reassess the task context. The conversation history has been preserved. New instructions from the user: ${historyItem.task}`
 					: "[TASK RESUMPTION] Please continue where you left off.")
 			const resolvedPrompt = await this.options.resolveContextMentions(effectivePrompt)
-			if (this.options.getTask() !== task) {
+			if (this.displayedTaskChanged(task)) {
 				await this.endStartedResume(sdkHost, startResult.sessionId)
 				await this.abandonFollowUp(`Task changed while resolving mentions for ${taskId}; cancelled follow-up`)
 				return
@@ -246,7 +246,7 @@ export class SdkFollowupCoordinator {
 			}
 
 			await this.options.postStateToWebview()
-			if (this.options.getTask() !== task) {
+			if (this.displayedTaskChanged(task)) {
 				await this.endStartedResume(sdkHost, startResult.sessionId)
 				await this.abandonFollowUp(`Task changed while posting resumed state for ${taskId}; cancelled follow-up`)
 				return
@@ -257,6 +257,17 @@ export class SdkFollowupCoordinator {
 			await this.endStartedResume(sdkHost, startResult.sessionId)
 			throw error
 		}
+	}
+
+	/**
+	 * Whether the displayed task no longer refers to the same logical task.
+	 * Compares task ids, not proxy identity: showTaskWithId allocates a fresh
+	 * proxy even when re-opening the currently displayed task, and that reload
+	 * must not cancel an in-flight follow-up.
+	 */
+	private displayedTaskChanged(task: TaskProxy): boolean {
+		const displayed = this.options.getTask()
+		return displayed !== task && displayed?.taskId !== task.taskId
 	}
 
 	private async endStartedResume(sdkHost: SdkSessionHost, sessionId: string): Promise<void> {
