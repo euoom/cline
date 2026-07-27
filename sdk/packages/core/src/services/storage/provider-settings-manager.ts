@@ -9,7 +9,11 @@ import {
 } from "node:fs";
 import { basename, dirname } from "node:path";
 import { resolveProviderSettingsPath } from "@cline/shared/storage";
-import { getLiveModelsCatalog } from "../..";
+// Import from the concrete module instead of the package barrel: pulling
+// `src/index.ts` into the hub/daemon bundles makes Bun's bundler emit a
+// dangling `__reExport(..., storage)` reference that crashes those bundles at
+// import time (see https://github.com/cline/cline/issues/12153).
+import { getLiveModelsCatalog } from "../llms/provider-defaults";
 import { getProviderAuthHandler } from "../../auth/provider-auth-registry";
 import { hashSecret, sdkDebug } from "../../logging/early-logger";
 import {
