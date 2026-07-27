@@ -187,14 +187,15 @@ class StdioMcpClient implements McpServerClient {
 			? Date.now() + this.connectAttemptTimeoutMs
 			: undefined;
 
-		for (const [attemptIndex, protocolMode] of attempts.entries()) {
+		for (const protocolMode of attempts) {
+			// Each attempt may spend the full remaining budget. The newline
+			// probe runs first and modern servers speak it, so a slow-starting
+			// server gets the whole configured timeout instead of a fraction;
+			// the framed fallback only gets time the first probe left over.
 			const attemptTimeoutMs =
 				connectDeadline === undefined
 					? this.connectAttemptTimeoutMs
-					: Math.floor(
-							Math.max(0, connectDeadline - Date.now()) /
-								(attempts.length - attemptIndex),
-						);
+					: connectDeadline - Date.now();
 			if (attemptTimeoutMs <= 0) {
 				lastError = this.createTimeoutError(
 					"initialize",
