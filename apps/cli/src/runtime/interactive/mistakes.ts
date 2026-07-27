@@ -2,7 +2,11 @@ export interface MistakeLimitContext {
 	iteration: number;
 	consecutiveMistakes: number;
 	maxConsecutiveMistakes: number;
-	reason: "api_error" | "invalid_tool_call" | "tool_execution_failed";
+	reason:
+		| "api_error"
+		| "invalid_tool_call"
+		| "tool_execution_failed"
+		| "tool_approval_denied";
 	details?: string;
 }
 
@@ -13,6 +17,14 @@ export function createMistakeLimitDecisionResolver(input: {
 	};
 }) {
 	return async (context: MistakeLimitContext) => {
+		if (context.reason === "tool_approval_denied") {
+			// The user has rejected several consecutive tool operations — stop
+			// and wait for guidance rather than prompting how to continue.
+			return {
+				action: "stop" as const,
+				reason: `stopped after ${context.consecutiveMistakes} consecutive user-rejected tool operations`,
+			};
+		}
 		if (input.autoApproveAllRef.current) {
 			return {
 				action: "stop" as const,

@@ -224,6 +224,14 @@ interface PreparedToolExecution {
 	tool?: AgentTool;
 	input: unknown;
 	skipReason?: string;
+	/**
+	 * True when `skipReason` came from the approval callback returning
+	 * `approved: false` — i.e. an explicit user rejection, as opposed to a
+	 * policy/hook skip or an approval-infrastructure failure. Denied tools
+	 * never execute; the flag is surfaced on the `tool-finished` event so
+	 * hosts can count consecutive rejections and stop runaway retry loops.
+	 */
+	deniedByUser?: boolean;
 }
 
 interface HookBag {
@@ -1292,8 +1300,30 @@ export class AgentRuntime {
 		toolCalls: AgentToolCallPart[],
 	): Promise<AgentMessage[]> {
 		const prepared: PreparedToolExecution[] = [];
+		let userRejectedPreviousTool = false;
 		for (const toolCall of toolCalls) {
-			prepared.push(await this.prepareToolExecution(toolCall));
+			if (userRejectedPreviousTool) {
+				// Legacy parity: once the user rejects a tool call, the rest of the
+				// assistant message must not run — the model should see the denial
+				// and re-plan instead of having its remaining calls (including
+				// potential fallback writes) executed anyway.
+				prepared.push({
+					toolCall,
+					tool: this.tools.get(toolCall.toolName),
+					input: toolCall.input,
+					skipReason:
+						"Skipping this tool call because the user rejected an earlier tool call in this message.",
+					// The skip is a consequence of the user's rejection, so flag it the
+					// same way — hosts must not treat it as a model mistake.
+					deniedByUser: true,
+				});
+				continue;
+			}
+			const preparedExecution = await this.prepareToolExecution(toolCall);
+			if (preparedExecution.deniedByUser) {
+				userRejectedPreviousTool = true;
+			}
+			prepared.push(preparedExecution);
 		}
 
 		if (this.config.toolExecution === "parallel") {
@@ -1393,6 +1423,7 @@ export class AgentRuntime {
 			}
 		}
 
+		let deniedByUser = false;
 		if (tool && !skipReason) {
 			const policy = {
 				...resolveToolPolicy(toolCall.toolName, this.config.toolPolicies),
@@ -1409,6 +1440,7 @@ export class AgentRuntime {
 				if (!approval.approved) {
 					skipReason =
 						approval.reason ?? `Tool "${toolCall.toolName}" was not approved`;
+					deniedByUser = approval.deniedByCallback === true;
 				}
 			}
 		}
@@ -1418,6 +1450,7 @@ export class AgentRuntime {
 			tool,
 			input,
 			skipReason,
+			...(deniedByUser ? { deniedByUser: true } : {}),
 		};
 	}
 
@@ -1425,7 +1458,7 @@ export class AgentRuntime {
 		toolCall: AgentToolCallPart,
 		input: unknown,
 		policy: ToolPolicy,
-	): Promise<ToolApprovalResult> {
+	): Promise<ToolApprovalResult & { deniedByCallback?: boolean }> {
 		const requestApproval = this.config.requestToolApproval;
 		if (!requestApproval) {
 			return {
@@ -1434,7 +1467,11 @@ export class AgentRuntime {
 			};
 		}
 		try {
-			return await requestApproval({
+			// A non-approval returned by the callback is an explicit decision from
+			// the host (typically the user clicking Reject) — distinct from the
+			// missing-callback and thrown-error paths, which are infrastructure
+			// failures rather than user denials.
+			const result = await requestApproval({
 				sessionId:
 					this.config.sessionId?.trim() ||
 					this.config.conversationId?.trim() ||
@@ -1451,6 +1488,7 @@ export class AgentRuntime {
 				input,
 				policy,
 			});
+			return result.approved ? result : { ...result, deniedByCallback: true };
 		} catch (error) {
 			return {
 				approved: false,
@@ -1554,6 +1592,7 @@ export class AgentRuntime {
 			iteration: this.state.iteration,
 			toolCall: prepared.toolCall,
 			message,
+			...(prepared.deniedByUser ? { deniedByUser: true } : {}),
 		});
 
 		return message;

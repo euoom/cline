@@ -712,6 +712,179 @@ describe("AgentRuntime", () => {
 		});
 	});
 
+	it("marks tool-finished events as deniedByUser when the approval callback rejects", async () => {
+		const executeTool = vi.fn(async () => ({ echoed: "hi" }));
+		const model = new ScriptedModel([
+			() => [
+				{
+					type: "tool-call-delta",
+					toolCallId: "call_denied",
+					toolName: "echo",
+					inputText: '{"text":"hi"}',
+				},
+				{ type: "finish", reason: "tool-calls" },
+			],
+			() => [
+				{ type: "text-delta", text: "done" },
+				{ type: "finish", reason: "stop" },
+			],
+		]);
+		const runtime = new AgentRuntime({
+			model,
+			tools: [
+				{
+					name: "echo",
+					description: "Echo input text",
+					inputSchema: { type: "object" },
+					execute: executeTool,
+				},
+			],
+			toolPolicies: { "*": { autoApprove: false } },
+			requestToolApproval: async () => ({
+				approved: false,
+				reason: "user clicked reject",
+			}),
+		});
+		const deniedFlags: Array<boolean | undefined> = [];
+		runtime.subscribe((event) => {
+			if (event.type === "tool-finished") {
+				deniedFlags.push(event.deniedByUser);
+			}
+		});
+
+		const result = await runtime.run("Start");
+
+		expect(result.status).toBe("completed");
+		expect(executeTool).not.toHaveBeenCalled();
+		expect(deniedFlags).toEqual([true]);
+	});
+
+	it("does not mark approval-infrastructure failures as deniedByUser", async () => {
+		const model = new ScriptedModel([
+			() => [
+				{
+					type: "tool-call-delta",
+					toolCallId: "call_approval_error",
+					toolName: "echo",
+					inputText: '{"text":"hi"}',
+				},
+				{ type: "finish", reason: "tool-calls" },
+			],
+			() => [
+				{ type: "text-delta", text: "done" },
+				{ type: "finish", reason: "stop" },
+			],
+		]);
+		const runtime = new AgentRuntime({
+			model,
+			tools: [createEchoTool()],
+			toolPolicies: { "*": { autoApprove: false } },
+			requestToolApproval: async () => {
+				throw new Error("approval transport broke");
+			},
+		});
+		const deniedFlags: Array<boolean | undefined> = [];
+		runtime.subscribe((event) => {
+			if (event.type === "tool-finished") {
+				deniedFlags.push(event.deniedByUser);
+			}
+		});
+
+		const result = await runtime.run("Start");
+
+		expect(result.status).toBe("completed");
+		expect(deniedFlags).toEqual([undefined]);
+	});
+
+	it("skips the remaining tool calls in a message after the user rejects one", async () => {
+		const firstTool = vi.fn(async () => ({ ok: true }));
+		const secondTool = vi.fn(async () => ({ ok: true }));
+		const model = new ScriptedModel([
+			() => [
+				{
+					type: "tool-call-delta",
+					toolCallId: "call_rejected",
+					toolName: "first_tool",
+					inputText: "{}",
+				},
+				{
+					type: "tool-call-delta",
+					toolCallId: "call_follower",
+					toolName: "second_tool",
+					inputText: "{}",
+				},
+				{ type: "finish", reason: "tool-calls" },
+			],
+			(request) => {
+				const toolMessages = request.messages.filter(
+					(message) => message.role === "tool",
+				);
+				expect(toolMessages).toHaveLength(2);
+				expect(toolMessages[0]?.content[0]).toMatchObject({
+					type: "tool-result",
+					toolCallId: "call_rejected",
+					isError: true,
+					output: { error: "user clicked reject" },
+				});
+				expect(toolMessages[1]?.content[0]).toMatchObject({
+					type: "tool-result",
+					toolCallId: "call_follower",
+					isError: true,
+					output: {
+						error:
+							"Skipping this tool call because the user rejected an earlier tool call in this message.",
+					},
+				});
+				return [
+					{ type: "text-delta", text: "denial handled" },
+					{ type: "finish", reason: "stop" },
+				];
+			},
+		]);
+		const requestToolApproval = vi.fn(async () => ({
+			approved: false,
+			reason: "user clicked reject",
+		}));
+		const runtime = new AgentRuntime({
+			model,
+			tools: [
+				{
+					name: "first_tool",
+					description: "First tool",
+					inputSchema: { type: "object" },
+					execute: firstTool,
+				},
+				{
+					name: "second_tool",
+					description: "Second tool",
+					inputSchema: { type: "object" },
+					execute: secondTool,
+				},
+			],
+			toolPolicies: { "*": { autoApprove: false } },
+			requestToolApproval,
+		});
+		const deniedFlags: Array<boolean | undefined> = [];
+		runtime.subscribe((event) => {
+			if (event.type === "tool-finished") {
+				deniedFlags.push(event.deniedByUser);
+			}
+		});
+
+		const result = await runtime.run("Start");
+
+		expect(result.status).toBe("completed");
+		expect(result.outputText).toBe("denial handled");
+		expect(firstTool).not.toHaveBeenCalled();
+		expect(secondTool).not.toHaveBeenCalled();
+		// Only the rejected call asked for approval; the follower was skipped
+		// without prompting the user again.
+		expect(requestToolApproval).toHaveBeenCalledTimes(1);
+		// Both results carry the denial flag so hosts don't count the skip as
+		// a model mistake.
+		expect(deniedFlags).toEqual([true, true]);
+	});
+
 	it("applies beforeTool approval policy overrides before executing tools", async () => {
 		const executeTool = vi.fn(async () => ({ echoed: "hi" }));
 		const requestToolApproval = vi.fn(async () => ({

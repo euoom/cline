@@ -69,6 +69,15 @@ interface DiffEditSession {
  */
 export class SdkDiffEditCoordinator {
 	private readonly sessions = new Map<string, DiffEditSession>()
+	/**
+	 * Tool calls the user explicitly rejected. The SDK never invokes an executor
+	 * for a denied tool call, so this is a defense-in-depth guard: if any code
+	 * path ever reaches the disk-writing executors with a rejected toolCallId,
+	 * the write is refused (ENG-2329: a rejected edit must never land on disk).
+	 * Bounded FIFO so long sessions don't grow it unboundedly.
+	 */
+	private readonly deniedToolCallIds = new Set<string>()
+	private static readonly MAX_TRACKED_DENIED_TOOL_CALLS = 256
 	private readonly fallbackEditorExecutor: EditorExecutor
 	private readonly fallbackApplyPatchExecutor: ApplyPatchExecutor
 	private readonly autoApprovePreviewLingerMs: number
@@ -109,6 +118,7 @@ export class SdkDiffEditCoordinator {
 	 */
 	async executeEditorTool(input: EditFileInput, cwd: string, context: AgentToolContext): Promise<string> {
 		const toolCallId = context.toolCallId ?? ""
+		this.assertNotDenied(toolCallId, "editor")
 		const hadPreApprovalPreview = this.sessions.has(toolCallId)
 		try {
 			if (!hadPreApprovalPreview && !this.options.isBackgroundEditEnabled()) {
@@ -139,6 +149,7 @@ export class SdkDiffEditCoordinator {
 	 */
 	async executeApplyPatchTool(input: ApplyPatchInput, cwd: string, context: AgentToolContext): Promise<string> {
 		const toolCallId = context.toolCallId ?? ""
+		this.assertNotDenied(toolCallId, "apply_patch")
 		const hadPreApprovalPreview = this.sessions.has(toolCallId)
 		try {
 			if (hadPreApprovalPreview) {
@@ -158,6 +169,37 @@ export class SdkDiffEditCoordinator {
 			return result
 		} finally {
 			await this.discardPreview(toolCallId)
+		}
+	}
+
+	/**
+	 * Records that the user rejected this tool call so the disk-writing
+	 * executors will refuse it even if some unexpected path invokes them.
+	 */
+	markDenied(toolCallId: string): void {
+		if (!toolCallId) {
+			return
+		}
+		if (this.deniedToolCallIds.size >= SdkDiffEditCoordinator.MAX_TRACKED_DENIED_TOOL_CALLS) {
+			const oldest = this.deniedToolCallIds.values().next().value
+			if (oldest !== undefined) {
+				this.deniedToolCallIds.delete(oldest)
+			}
+		}
+		this.deniedToolCallIds.add(toolCallId)
+	}
+
+	/**
+	 * Refuses execution of a tool call the user rejected. The SDK's approval
+	 * gate means this should be unreachable; if it ever fires we have a
+	 * reject-bypass bug, so log loudly before failing the write.
+	 */
+	private assertNotDenied(toolCallId: string, toolName: string): void {
+		if (toolCallId && this.deniedToolCallIds.has(toolCallId)) {
+			Logger.error(
+				`[SdkDiffEditCoordinator] BUG: ${toolName} executor invoked for user-rejected tool call ${toolCallId}; refusing to write`,
+			)
+			throw new Error("The user rejected this operation, so it was not performed. The file was NOT modified.")
 		}
 	}
 

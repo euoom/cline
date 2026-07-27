@@ -319,6 +319,9 @@ export class Controller {
 				this.messageTranslatorState.recordApprovedToolMessageTs(toolCallId, messageTs),
 			recordDeniedToolApproval: (toolCallId, toolName, reason) => {
 				this.messageTranslatorState.recordDeniedToolApproval(toolCallId, toolName, reason)
+				// Hard guard: a rejected tool call must never reach the disk-writing
+				// executors, whatever path tries to run it (ENG-2329).
+				this.diffEdits.markDenied(toolCallId)
 				// A denied edit's executor never runs, so close its diff preview here. Covers
 				// manual Reject and clearPending (task cancel/abort) in one place.
 				void this.diffEdits.discardPreview(toolCallId)

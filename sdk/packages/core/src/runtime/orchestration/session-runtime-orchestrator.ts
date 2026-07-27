@@ -73,6 +73,10 @@ import {
 	type ConnectionUpdate,
 	normalizeConnectionUpdate,
 } from "../config/connection-update";
+import {
+	DEFAULT_MAX_CONSECUTIVE_TOOL_DENIALS,
+	DenialTracker,
+} from "../safety/denial-tracker";
 import { LoopDetectionTracker } from "../safety/loop-detection";
 import { MistakeTracker } from "../safety/mistake-tracker";
 import { RuntimeEventAdapter } from "./runtime-event-adapter";
@@ -288,6 +292,7 @@ export class SessionRuntime {
 	readonly telemetry?: ITelemetryService;
 	private readonly conversation: ConversationStore;
 	private readonly mistakeTracker: MistakeTracker;
+	private readonly denialTracker: DenialTracker;
 	private readonly loopTracker: LoopDetectionTracker;
 	/**
 	 * True when `execution.loopDetection === false` at construction
@@ -353,6 +358,15 @@ export class SessionRuntime {
 	private currentTurnSuccessfulTools = 0;
 	private currentTurnFailedTools = 0;
 	private currentTurnFailureDetails: string[] = [];
+	/**
+	 * True when the current turn contained a tool call the user explicitly
+	 * rejected (`deniedByUser` on `tool-finished`). Consumed on
+	 * `turn-finished` to feed the DenialTracker — once per turn, no matter
+	 * how many calls the rejection skipped — and to keep user denials out
+	 * of the MistakeTracker's model-error feed.
+	 */
+	private currentTurnHadUserDenial = false;
+	private currentTurnDenialDetails: string | undefined;
 	/**
 	 * Serial queue for `MistakeTracker.record(...)` + loop-detection
 	 * side-effects fired from the sync `handleRuntimeEvent` stream. The
@@ -429,6 +443,38 @@ export class SessionRuntime {
 			getConversationId: () => this.conversation.getConversationId(),
 			getActiveRunId: () => this.activeRunId ?? "",
 			appendRecoveryNotice: (message, _reason) => {
+				this.conversation.appendMessage({
+					role: "user",
+					content: [{ type: "text", text: message }],
+				});
+			},
+		});
+		const maxDenials =
+			config.execution?.maxConsecutiveToolDenials ??
+			DEFAULT_MAX_CONSECUTIVE_TOOL_DENIALS;
+		this.denialTracker = new DenialTracker({
+			maxConsecutiveDenials: maxDenials,
+			onLimitReached: config.onConsecutiveMistakeLimitReached,
+			onLimitTelemetry: (context) => {
+				captureMistakeLimitReached(this.telemetry, {
+					ulid: this.config.sessionId ?? this.conversation.getConversationId(),
+					model: this.config.modelId,
+					provider: this.config.providerId,
+					reason: context.reason,
+					consecutiveMistakes: context.consecutiveMistakes,
+					maxConsecutiveMistakes: context.maxConsecutiveMistakes,
+					agentId: this.agentId,
+					conversationId: this.conversation.getConversationId(),
+					parentAgentId: this.parentAgentId,
+					isSubagent: Boolean(this.parentAgentId),
+				});
+			},
+			log: (level, message, metadata) =>
+				leveledLog(this.logger, level, message, metadata),
+			agentId: this.agentId,
+			getConversationId: () => this.conversation.getConversationId(),
+			getActiveRunId: () => this.activeRunId ?? "",
+			appendRecoveryNotice: (message) => {
 				this.conversation.appendMessage({
 					role: "user",
 					content: [{ type: "text", text: message }],
@@ -538,6 +584,7 @@ export class SessionRuntime {
 	private resetConversationBoundaryTrackers(): void {
 		this.messageBuilder.resetConversationState();
 		this.mistakeTracker.reset();
+		this.denialTracker.reset();
 		this.loopTracker.reset();
 	}
 
@@ -768,8 +815,13 @@ export class SessionRuntime {
 		this.currentTurnSuccessfulTools = 0;
 		this.currentTurnFailedTools = 0;
 		this.currentTurnFailureDetails = [];
+		this.currentTurnHadUserDenial = false;
+		this.currentTurnDenialDetails = undefined;
 		this.activeTrackerWork = Promise.resolve();
 		this.trackerAbortInFlight = false;
+		// Each run starts from fresh user input, which supersedes earlier
+		// rejections — the denial counter only guards a single runaway run.
+		this.denialTracker.reset();
 
 		const startedAt = new Date();
 		const effectiveUserMessage = input.userMessage;
@@ -1079,6 +1131,8 @@ export class SessionRuntime {
 				this.currentTurnSuccessfulTools = 0;
 				this.currentTurnFailedTools = 0;
 				this.currentTurnFailureDetails = [];
+				this.currentTurnHadUserDenial = false;
+				this.currentTurnDenialDetails = undefined;
 				break;
 			}
 			case "tool-started": {
@@ -1131,7 +1185,16 @@ export class SessionRuntime {
 				};
 				this.currentRunToolCalls.push(record);
 				// Per-turn success/failure bookkeeping for MistakeTracker.
-				if (isError) {
+				// Explicit user rejections (and the calls they skipped) are not
+				// model mistakes — they feed the DenialTracker at turn end instead.
+				if (event.deniedByUser === true) {
+					this.currentTurnHadUserDenial = true;
+					if (this.currentTurnDenialDetails === undefined) {
+						this.currentTurnDenialDetails = `[${event.toolCall.toolName}] ${
+							errorText ?? "rejected by the user"
+						}`;
+					}
+				} else if (isError) {
 					this.currentTurnFailedTools += 1;
 					if (errorText) {
 						this.currentTurnFailureDetails.push(
@@ -1150,7 +1213,18 @@ export class SessionRuntime {
 				// reset on productive turns.
 				const failed = this.currentTurnFailedTools;
 				const succeeded = this.currentTurnSuccessfulTools;
-				if (failed > 0 && succeeded === 0) {
+				const hadUserDenial = this.currentTurnHadUserDenial;
+				if (hadUserDenial) {
+					// One denial per turn, regardless of how many calls the
+					// rejection also skipped. Successful auto-approved calls do
+					// NOT reset this counter — an escalating retry loop that
+					// re-reads files between rejected edits must still stop.
+					this.enqueueDenialRecord(
+						event.iteration,
+						this.currentTurnDenialDetails,
+					);
+				}
+				if (failed > 0 && succeeded === 0 && !hadUserDenial) {
 					const details = this.currentTurnFailureDetails.join("; ");
 					this.enqueueMistakeRecord({
 						iteration: event.iteration,
@@ -1298,6 +1372,33 @@ export class SessionRuntime {
 				return;
 			}
 			const outcome = await this.mistakeTracker.record(input);
+			if (outcome.action === "stop") {
+				this.trackerAbortInFlight = true;
+				this.conversation.appendMessage({
+					role: "user",
+					content: [{ type: "text", text: outcome.message }],
+				});
+				this.activeRuntime?.abort(outcome.reason ?? outcome.message);
+			}
+		});
+	}
+
+	/**
+	 * Enqueue a user-denial record onto the serial tracker work chain.
+	 * Mirrors `enqueueMistakeRecord`, but feeds the DenialTracker: when
+	 * the user has rejected `maxConsecutiveToolDenials` turns in a row,
+	 * the run stops (subject to the host's limit decision) instead of
+	 * letting the model retry the rejected operation indefinitely.
+	 */
+	private enqueueDenialRecord(iteration: number, details?: string): void {
+		if (this.trackerAbortInFlight) {
+			return;
+		}
+		this.activeTrackerWork = this.activeTrackerWork.then(async () => {
+			if (this.trackerAbortInFlight) {
+				return;
+			}
+			const outcome = await this.denialTracker.record({ iteration, details });
 			if (outcome.action === "stop") {
 				this.trackerAbortInFlight = true;
 				this.conversation.appendMessage({

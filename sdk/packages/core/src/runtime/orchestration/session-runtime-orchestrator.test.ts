@@ -2128,6 +2128,252 @@ function failedStructuredToolTurnEvents(): AgentRuntimeEvent[] {
 	];
 }
 
+/**
+ * One turn whose only tool call was explicitly rejected by the user
+ * (`deniedByUser: true` on tool-finished). Optionally includes a successful
+ * auto-approved call in the same turn.
+ */
+function deniedToolTurnEvents(
+	iteration: number,
+	options: { withSuccessfulTool?: boolean } = {},
+): AgentRuntimeEvent[] {
+	const deniedCall = {
+		type: "tool-call" as const,
+		toolCallId: `tc_denied_${iteration}`,
+		toolName: "editor",
+		input: { path: "TODO_LIST.md" },
+	};
+	const events: AgentRuntimeEvent[] = [
+		{ type: "turn-started", iteration, snapshot: makeSnapshot() },
+		{
+			type: "tool-started",
+			iteration,
+			toolCall: deniedCall,
+			snapshot: makeSnapshot(),
+		},
+		{
+			type: "tool-finished",
+			iteration,
+			toolCall: deniedCall,
+			message: {
+				id: `m_denied_${iteration}`,
+				role: "tool",
+				content: [
+					{
+						type: "tool-result",
+						toolCallId: deniedCall.toolCallId,
+						toolName: "editor",
+						output: { error: "The user denied this edit." },
+						isError: true,
+					},
+				],
+				createdAt: 1,
+			},
+			deniedByUser: true,
+			snapshot: makeSnapshot(),
+		},
+	];
+	if (options.withSuccessfulTool) {
+		const readCall = {
+			type: "tool-call" as const,
+			toolCallId: `tc_read_${iteration}`,
+			toolName: "read_files",
+			input: { paths: ["README.md"] },
+		};
+		events.push(
+			{
+				type: "tool-started",
+				iteration,
+				toolCall: readCall,
+				snapshot: makeSnapshot(),
+			},
+			{
+				type: "tool-finished",
+				iteration,
+				toolCall: readCall,
+				message: {
+					id: `m_read_${iteration}`,
+					role: "tool",
+					content: [
+						{
+							type: "tool-result",
+							toolCallId: readCall.toolCallId,
+							toolName: "read_files",
+							output: "file contents",
+						},
+					],
+					createdAt: 1,
+				},
+				snapshot: makeSnapshot(),
+			},
+		);
+	}
+	events.push({
+		type: "turn-finished",
+		iteration,
+		toolCallCount: options.withSuccessfulTool ? 2 : 1,
+		snapshot: makeSnapshot(),
+	});
+	return events;
+}
+
+describe("SessionRuntime.run — consecutive tool-denial guard (ENG-2329)", () => {
+	it("stops the run after three user-rejected turns by default", async () => {
+		const { deps, abortCalls } = makeScriptedRuntime({
+			events: [
+				...deniedToolTurnEvents(1),
+				...deniedToolTurnEvents(2),
+				...deniedToolTurnEvents(3),
+			],
+		});
+		const session = new SessionRuntime(makeAgentConfig(), deps);
+
+		await session.run("create the file");
+
+		expect(abortCalls).toHaveLength(1);
+		expect(abortCalls[0]).toContain(
+			"maximum consecutive tool denials reached (3)",
+		);
+		// The stop notice tells the model the rejected operations never happened.
+		const texts = session
+			.getMessages()
+			.flatMap((message) =>
+				message.role === "user" && typeof message.content !== "string"
+					? message.content
+					: [],
+			)
+			.filter(
+				(part): part is { type: "text"; text: string } =>
+					typeof part === "object" &&
+					part !== null &&
+					(part as { type?: string }).type === "text",
+			)
+			.map((part) => part.text);
+		expect(
+			texts.some((text) =>
+				text.includes(
+					"Stopped after the user rejected 3 consecutive tool operations",
+				),
+			),
+		).toBe(true);
+	});
+
+	it("does not stop before the denial limit is reached", async () => {
+		const { deps, abortCalls } = makeScriptedRuntime({
+			events: [...deniedToolTurnEvents(1), ...deniedToolTurnEvents(2)],
+		});
+		const session = new SessionRuntime(makeAgentConfig(), deps);
+
+		await session.run("create the file");
+
+		expect(abortCalls).toHaveLength(0);
+	});
+
+	it("does not let successful tool calls between rejections reset the denial counter", async () => {
+		// The escalation pattern from the QA report: reject → model re-reads the
+		// file (auto-approved, succeeds) → proposes again → reject → ...
+		const { deps, abortCalls } = makeScriptedRuntime({
+			events: [
+				...deniedToolTurnEvents(1),
+				...deniedToolTurnEvents(2, { withSuccessfulTool: true }),
+				...deniedToolTurnEvents(3, { withSuccessfulTool: true }),
+			],
+		});
+		const session = new SessionRuntime(makeAgentConfig(), deps);
+
+		await session.run("create the file");
+
+		expect(abortCalls).toHaveLength(1);
+		expect(abortCalls[0]).toContain(
+			"maximum consecutive tool denials reached (3)",
+		);
+	});
+
+	it("does not count user denials as model mistakes", async () => {
+		const { deps, abortCalls } = makeScriptedRuntime({
+			events: deniedToolTurnEvents(1),
+		});
+		const errors: string[] = [];
+		const session = new SessionRuntime(
+			makeAgentConfig({ execution: { maxConsecutiveMistakes: 1 } }),
+			deps,
+		);
+		session.subscribeEvents((event) => {
+			if (event.type === "error") {
+				errors.push(event.error.message);
+			}
+		});
+
+		await session.run("create the file");
+
+		// One denial: below the denial limit (3) and never fed to the mistake
+		// tracker (limit 1 would have aborted otherwise).
+		expect(abortCalls).toHaveLength(0);
+		expect(errors).toHaveLength(0);
+	});
+
+	it("resets the denial counter on every new run (new user input)", async () => {
+		const { deps, abortCalls } = makeScriptedRuntime({
+			events: [...deniedToolTurnEvents(1), ...deniedToolTurnEvents(2)],
+		});
+		const session = new SessionRuntime(makeAgentConfig(), deps);
+
+		await session.run("create the file");
+		await session.continue("try again please");
+
+		// 2 denials per run, counter reset between runs — never reaches 3.
+		expect(abortCalls).toHaveLength(0);
+	});
+
+	it("resolves the host limit callback with reason tool_approval_denied and honors continue-with-guidance", async () => {
+		const onLimit = vi.fn(async () => ({
+			action: "continue" as const,
+			guidance: "The user keeps rejecting this; ask what they want instead.",
+		}));
+		const { deps, abortCalls } = makeScriptedRuntime({
+			events: [
+				...deniedToolTurnEvents(1),
+				...deniedToolTurnEvents(2),
+				...deniedToolTurnEvents(3),
+			],
+		});
+		const session = new SessionRuntime(
+			makeAgentConfig({
+				execution: { maxConsecutiveToolDenials: 3 },
+				onConsecutiveMistakeLimitReached: onLimit,
+			}),
+			deps,
+		);
+
+		await session.run("create the file");
+
+		expect(onLimit).toHaveBeenCalledTimes(1);
+		expect(onLimit.mock.calls[0][0]).toMatchObject({
+			reason: "tool_approval_denied",
+			consecutiveMistakes: 3,
+			maxConsecutiveMistakes: 3,
+		});
+		expect(abortCalls).toHaveLength(0);
+	});
+
+	it("honors a custom maxConsecutiveToolDenials", async () => {
+		const { deps, abortCalls } = makeScriptedRuntime({
+			events: deniedToolTurnEvents(1),
+		});
+		const session = new SessionRuntime(
+			makeAgentConfig({ execution: { maxConsecutiveToolDenials: 1 } }),
+			deps,
+		);
+
+		await session.run("create the file");
+
+		expect(abortCalls).toHaveLength(1);
+		expect(abortCalls[0]).toContain(
+			"maximum consecutive tool denials reached (1)",
+		);
+	});
+});
+
 describe("SessionRuntime.run — tracker wiring (P1 #3)", () => {
 	it("aborts after maxConsecutiveMistakes failed-tool turns", async () => {
 		const { deps, abortCalls } = makeScriptedRuntime({

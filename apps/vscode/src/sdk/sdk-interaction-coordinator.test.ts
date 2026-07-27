@@ -396,6 +396,36 @@ describe("SdkInteractionCoordinator", () => {
 		expect(errorText).toContain("Send a message to give Cline guidance")
 	})
 
+	it("shows denial-specific copy and stops when the user rejected too many operations in a row", async () => {
+		const task = createTaskProxy("session-123", vi.fn(), vi.fn())
+		const coordinator = new SdkInteractionCoordinator({
+			messages: new SdkMessageCoordinator({ getTask: () => task }),
+			getSessionId: () => "session-123",
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		})
+
+		await expect(
+			coordinator.handleConsecutiveMistakeLimitReached({
+				iteration: 5,
+				consecutiveMistakes: 3,
+				maxConsecutiveMistakes: 3,
+				reason: "tool_approval_denied",
+				details: "[editor] The user denied this edit.",
+			}),
+		).resolves.toEqual({
+			action: "stop",
+			reason: "tool_denial_limit_reached: tool_approval_denied: [editor] The user denied this edit.",
+		})
+
+		const errorText = task.messageStateHandler.getClineMessages()[0].text ?? ""
+		// The user's rejections are not "errors" — the row must say the stop was
+		// their decision and that nothing was applied.
+		expect(errorText).toContain("You rejected 3 operations in a row")
+		expect(errorText).toContain("None of the rejected changes were applied")
+		expect(errorText).not.toContain("errors in a row")
+		expect(errorText).toContain("Send a message to give Cline guidance")
+	})
+
 	it("summarizes the mistake limit without details using the iteration", async () => {
 		const task = createTaskProxy("session-123", vi.fn(), vi.fn())
 		const coordinator = new SdkInteractionCoordinator({

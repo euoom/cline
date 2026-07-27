@@ -194,7 +194,11 @@ export interface ConsecutiveMistakeLimitContext {
 	iteration: number;
 	consecutiveMistakes: number;
 	maxConsecutiveMistakes: number;
-	reason: "api_error" | "invalid_tool_call" | "tool_execution_failed";
+	reason:
+		| "api_error"
+		| "invalid_tool_call"
+		| "tool_execution_failed"
+		| "tool_approval_denied";
 	details?: string;
 }
 
@@ -227,6 +231,14 @@ export interface AgentExecutionConfig {
 	 * @default 6
 	 */
 	maxConsecutiveMistakes?: number;
+	/**
+	 * Maximum consecutive user-rejected tool approvals before the run stops
+	 * and waits for user guidance. Prevents runaway retry loops where the
+	 * model keeps re-proposing an operation the user keeps rejecting.
+	 * Resets on every new run (i.e. new user input).
+	 * @default 3
+	 */
+	maxConsecutiveToolDenials?: number;
 	/**
 	 * After this many consecutive iterations with tool calls,
 	 * inject a reminder text block asking the agent to answer if it has enough info.
@@ -911,6 +923,7 @@ export const AgentConfigSchema = z.object({
 	execution: z
 		.object({
 			maxConsecutiveMistakes: z.number().int().positive().optional(),
+			maxConsecutiveToolDenials: z.number().int().positive().optional(),
 			reminderAfterIterations: z.number().nonnegative().optional(),
 			reminderText: z.string().optional(),
 			loopDetection: z
@@ -993,6 +1006,7 @@ export const AgentConfigSchema = z.object({
 					"api_error",
 					"invalid_tool_call",
 					"tool_execution_failed",
+					"tool_approval_denied",
 				]),
 				details: z.string().optional(),
 			}),

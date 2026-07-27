@@ -478,6 +478,47 @@ describe("SdkDiffEditCoordinator", () => {
 		expect(previews[1].closed).toBe(1)
 	})
 
+	it("refuses to write for a tool call the user rejected (editor)", async () => {
+		await writeFile("a.ts", "old content")
+		const input = { path: "a.ts", old_text: "old", new_text: "new" }
+		await coordinator.openForApproval("tc_denied", "editor", input)
+
+		coordinator.markDenied("tc_denied")
+		await coordinator.discardPreview("tc_denied")
+
+		await expect(coordinator.executeEditorTool(input, tempDir, makeContext("tc_denied"))).rejects.toThrow(
+			"The user rejected this operation",
+		)
+		expect(fallbackEditor).not.toHaveBeenCalled()
+	})
+
+	it("refuses to write for a tool call the user rejected (apply_patch)", async () => {
+		await writeFile("patched.ts", "line one\n")
+		const patch = ["*** Begin Patch", "*** Update File: patched.ts", "@@", "-line one", "+line ONE", "*** End Patch"].join(
+			"\n",
+		)
+		coordinator.markDenied("tc_denied_patch")
+
+		await expect(
+			coordinator.executeApplyPatchTool({ input: patch }, tempDir, makeContext("tc_denied_patch")),
+		).rejects.toThrow("The user rejected this operation")
+		expect(fallbackApplyPatch).not.toHaveBeenCalled()
+	})
+
+	it("still writes other tool calls after one was denied, and ignores empty ids", async () => {
+		await writeFile("a.ts", "old content")
+		coordinator.markDenied("tc_denied")
+		coordinator.markDenied("")
+
+		const input = { path: "a.ts", old_text: "old", new_text: "new" }
+		const result = await coordinator.executeEditorTool(input, tempDir, makeContext("tc_other"))
+		expect(result).toBe("fallback editor result")
+
+		// An executor context with an empty toolCallId is not treated as denied.
+		const noIdResult = await coordinator.executeEditorTool(input, tempDir, makeContext(""))
+		expect(noIdResult).toBe("fallback editor result")
+	})
+
 	it("previews the first file of an apply_patch and closes it before the default executor runs", async () => {
 		await writeFile("patched.ts", "line one\nline two\n")
 		const patch = ["*** Begin Patch", "*** Update File: patched.ts", "@@", "-line one", "+line ONE", "*** End Patch"].join(

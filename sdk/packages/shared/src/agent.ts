@@ -520,6 +520,12 @@ export type AgentRuntimeEvent =
 			iteration: number;
 			toolCall: AgentToolCallPart;
 			message: AgentMessage;
+			/**
+			 * True when the tool did not execute because the user explicitly
+			 * rejected it via the approval callback. Lets hosts distinguish
+			 * user denials from ordinary tool failures.
+			 */
+			deniedByUser?: boolean;
 	  }
 	| {
 			type: "usage-updated";

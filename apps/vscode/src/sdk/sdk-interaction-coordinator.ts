@@ -69,11 +69,17 @@ export class SdkInteractionCoordinator {
 	): Promise<ConsecutiveMistakeLimitDecision> {
 		const detail = context.details?.trim()
 		const latest = detail ? `${context.reason}: ${detail}` : `${context.reason} at iteration ${context.iteration}`
+		// A denial stop is the user's decision, not a model error — say so instead
+		// of reporting "errors in a row".
+		const text =
+			context.reason === "tool_approval_denied"
+				? `You rejected ${context.consecutiveMistakes} operations in a row, so Cline stopped the task. None of the rejected changes were applied.\n\nSend a message to give Cline guidance and continue the task.`
+				: `Cline ran into ${context.consecutiveMistakes} errors in a row and stopped the task.\n\nLatest: ${latest}\n\nSend a message to give Cline guidance and continue the task.`
 		const errorMessage: ClineMessage = {
 			ts: this.nextMessageTs(),
 			type: "say",
 			say: "error",
-			text: `Cline ran into ${context.consecutiveMistakes} errors in a row and stopped the task.\n\nLatest: ${latest}\n\nSend a message to give Cline guidance and continue the task.`,
+			text,
 			partial: false,
 		}
 
@@ -83,7 +89,8 @@ export class SdkInteractionCoordinator {
 		})
 		await this.options.postStateToWebview()
 
-		return { action: "stop", reason: `mistake_limit_reached: ${latest}` }
+		const stopKind = context.reason === "tool_approval_denied" ? "tool_denial_limit_reached" : "mistake_limit_reached"
+		return { action: "stop", reason: `${stopKind}: ${latest}` }
 	}
 
 	async handleRequestToolApproval(request: ToolApprovalRequest): Promise<{ approved: boolean; reason?: string }> {

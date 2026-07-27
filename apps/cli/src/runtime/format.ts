@@ -20,13 +20,25 @@ export async function resolveMistakeLimitDecision(
 		iteration: number;
 		consecutiveMistakes: number;
 		maxConsecutiveMistakes: number;
-		reason: "api_error" | "invalid_tool_call" | "tool_execution_failed";
+		reason:
+			| "api_error"
+			| "invalid_tool_call"
+			| "tool_execution_failed"
+			| "tool_approval_denied";
 		details?: string;
 	},
 ): Promise<
 	| { action: "continue"; guidance?: string }
 	| { action: "stop"; reason?: string }
 > {
+	if (context.reason === "tool_approval_denied") {
+		// The user has rejected several consecutive tool operations — stop and
+		// wait for guidance rather than prompting how to continue.
+		return {
+			action: "stop",
+			reason: `stopped after ${context.consecutiveMistakes} consecutive user-rejected tool operations`,
+		};
+	}
 	const yoloEnabled = config.toolPolicies["*"]?.autoApprove !== false;
 	if (yoloEnabled) {
 		return {
