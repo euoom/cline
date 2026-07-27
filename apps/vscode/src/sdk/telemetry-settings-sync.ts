@@ -1,13 +1,12 @@
-import { existsSync } from "node:fs"
 import { readGlobalSettings, setTelemetryOptOutGlobally } from "@cline/core"
-import { resolveGlobalSettingsPath } from "@cline/shared/storage"
 import type { TelemetrySetting } from "@shared/TelemetrySetting"
 import { Logger } from "@/shared/services/Logger"
 
 interface TelemetryStateManager {
 	getGlobalSettingsKey(key: "telemetrySetting"): TelemetrySetting | boolean | undefined
+	getGlobalStateKey(key: "lastSyncedTelemetrySetting"): TelemetrySetting | undefined
 	getRemoteConfigSettings(): { telemetrySetting?: TelemetrySetting }
-	setGlobalState(key: "telemetrySetting", value: TelemetrySetting): void
+	setGlobalState(key: "telemetrySetting" | "lastSyncedTelemetrySetting", value: TelemetrySetting): void
 }
 
 export function telemetrySettingFromSharedGlobalSettings(): TelemetrySetting {
@@ -29,25 +28,41 @@ function normalizeLegacyTelemetrySetting(value: TelemetrySetting | boolean | und
 
 export function syncTelemetrySettingFromSharedGlobalSettings(stateManager: TelemetryStateManager): void {
 	try {
-		const sharedSettingsPath = resolveGlobalSettingsPath()
-		if (!existsSync(sharedSettingsPath)) {
-			const legacyTelemetrySetting = normalizeLegacyTelemetrySetting(stateManager.getGlobalSettingsKey("telemetrySetting"))
-			if (legacyTelemetrySetting !== undefined) {
-				// One-time migration from the legacy VS Code globalState.json field into
-				// the CLI/shared global settings file. Older builds stored this as a
-				// boolean where false meant telemetry was disabled.
-				// Do not emit opt-out telemetry for migration; this is not a new explicit
-				// user action.
-				setTelemetryOptOutGlobally(legacyTelemetrySetting === "disabled")
-			}
+		if (stateManager.getRemoteConfigSettings().telemetrySetting !== undefined) {
+			// Remote config governs telemetry for this user; don't reconcile the
+			// local stores against the remotely-enforced value.
+			return
+		}
+
+		const legacyTelemetrySetting = normalizeLegacyTelemetrySetting(stateManager.getGlobalSettingsKey("telemetrySetting"))
+		const lastSyncedTelemetrySetting = stateManager.getGlobalStateKey("lastSyncedTelemetrySetting")
+		if (
+			legacyTelemetrySetting === "disabled" &&
+			legacyTelemetrySetting !== lastSyncedTelemetrySetting &&
+			!readGlobalSettings().telemetryOptOut
+		) {
+			// The legacy VS Code globalState value changed outside this build's own
+			// mirroring — either this is the first activation after upgrading from a
+			// legacy (pre-SDK) build, or the user rolled back and opted out there.
+			// The legacy store is the only place that choice lives, so import it
+			// into the shared global settings file even when the file already
+			// exists: other Cline surfaces (e.g. the CLI or hub daemon) create it
+			// with telemetryOptOut defaulted to false without the user ever making
+			// a telemetry choice (ENG-2334). Only opt-outs are imported — an
+			// existing shared opt-out is never silently flipped back to enabled.
+			// Do not emit opt-out telemetry for the import; this is not a new
+			// explicit user action.
+			setTelemetryOptOutGlobally(true)
 		}
 
 		const telemetrySetting = telemetrySettingFromSharedGlobalSettings()
-		const remoteTelemetrySetting = stateManager.getRemoteConfigSettings().telemetrySetting
-		if (remoteTelemetrySetting === undefined && stateManager.getGlobalSettingsKey("telemetrySetting") !== telemetrySetting) {
+		if (stateManager.getGlobalSettingsKey("telemetrySetting") !== telemetrySetting) {
 			// Keep the legacy in-memory state mirrored so existing VS Code telemetry
 			// providers that still read StateManager observe the shared setting.
 			stateManager.setGlobalState("telemetrySetting", telemetrySetting)
+		}
+		if (lastSyncedTelemetrySetting !== telemetrySetting) {
+			stateManager.setGlobalState("lastSyncedTelemetrySetting", telemetrySetting)
 		}
 	} catch (error) {
 		Logger.warn(`[SdkController] Failed to sync shared telemetry setting: ${error}`)

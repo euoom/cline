@@ -94,6 +94,12 @@ const GLOBAL_STATE_FIELDS = {
 	remoteWorkflowToggles: { default: {} as ClineRulesToggles },
 	remoteSkillsToggles: { default: {} as ClineRulesToggles },
 	dismissedBanners: { default: [] as Array<{ bannerId: string; dismissedAt: number }> },
+	// The shared-settings-derived telemetry value last reconciled by
+	// syncTelemetrySettingFromSharedGlobalSettings. Lets the sync distinguish a
+	// telemetrySetting change made by a legacy (pre-SDK) build — which must be
+	// imported into the shared global settings file — from this build's own
+	// mirroring or an external change made through the shared file (e.g. CLI).
+	lastSyncedTelemetrySetting: { default: undefined as TelemetrySetting | undefined },
 	// Path to worktree that should auto-open Cline sidebar when launched
 	worktreeAutoOpenPath: { default: undefined as string | undefined },
 } satisfies FieldDefinitions
