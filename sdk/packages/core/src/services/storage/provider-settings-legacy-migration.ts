@@ -164,6 +164,50 @@ const OPENAI_COMPATIBLE_PROVIDER_ID =
 	LlmsModels.BUILT_IN_PROVIDER.OPENAI_COMPATIBLE;
 const LEGACY_OPENAI_COMPATIBLE_CONTEXT_WINDOW = 128_000;
 
+/**
+ * Maps every legacy provider id to the secret key that stores its API key.
+ *
+ * This is the single source of truth shared by candidate collection and
+ * settings building: any provider listed here becomes a migration candidate
+ * whenever its secret is present, so stored keys are never silently dropped.
+ */
+const LEGACY_API_KEY_SECRET_BY_PROVIDER: Record<string, keyof LegacySecrets> = {
+	anthropic: "apiKey",
+	cline: "clineApiKey",
+	[LEGACY_OPENAI_COMPATIBLE_PROVIDER_ID]: "openAiApiKey",
+	"openai-native": "openAiNativeApiKey",
+	openrouter: "openRouterApiKey",
+	bedrock: "awsBedrockApiKey",
+	gemini: "geminiApiKey",
+	ollama: "ollamaApiKey",
+	deepseek: "deepSeekApiKey",
+	requesty: "requestyApiKey",
+	together: "togetherApiKey",
+	fireworks: "fireworksApiKey",
+	qwen: "qwenApiKey",
+	doubao: "doubaoApiKey",
+	mistral: "mistralApiKey",
+	litellm: "liteLlmApiKey",
+	asksage: "asksageApiKey",
+	xai: "xaiApiKey",
+	moonshot: "moonshotApiKey",
+	zai: "zaiApiKey",
+	huggingface: "huggingFaceApiKey",
+	nebius: "nebiusApiKey",
+	sambanova: "sambanovaApiKey",
+	cerebras: "cerebrasApiKey",
+	groq: "groqApiKey",
+	"huawei-cloud-maas": "huaweiCloudMaasApiKey",
+	baseten: "basetenApiKey",
+	"vercel-ai-gateway": "vercelAiGatewayApiKey",
+	dify: "difyApiKey",
+	minimax: "minimaxApiKey",
+	hicap: "hicapApiKey",
+	aihubmix: "aihubmixApiKey",
+	nousResearch: "nousResearchApiKey",
+	oca: "ocaApiKey",
+};
+
 export interface MigrateLegacyProviderSettingsOptions {
 	providerSettingsManager: ProviderSettingsManager;
 	dataDir?: string;
@@ -285,13 +329,51 @@ function resolveMigratedProviderId(providerId: string): string {
 	return providerId;
 }
 
+const PROVIDER_MODEL_KEY_SUFFIX_BY_ID: Record<string, string> = {
+	openrouter: "OpenRouterModelId",
+	cline: "ClineModelId",
+	openai: "OpenAiModelId",
+	ollama: "OllamaModelId",
+	lmstudio: "LmStudioModelId",
+	litellm: "LiteLlmModelId",
+	requesty: "RequestyModelId",
+	together: "TogetherModelId",
+	fireworks: "FireworksModelId",
+	sapaicore: "SapAiCoreModelId",
+	groq: "GroqModelId",
+	baseten: "BasetenModelId",
+	huggingface: "HuggingFaceModelId",
+	"huawei-cloud-maas": "HuaweiCloudMaasModelId",
+	oca: "OcaModelId",
+	aihubmix: "AihubmixModelId",
+	hicap: "HicapModelId",
+	nousResearch: "NousResearchModelId",
+	"vercel-ai-gateway": "VercelAiGatewayModelId",
+};
+
+function readProviderModelId(
+	legacy: LegacyGlobalState,
+	providerId: string,
+	mode: LegacyMode,
+): string | undefined {
+	const suffix = PROVIDER_MODEL_KEY_SUFFIX_BY_ID[providerId];
+	if (!suffix) {
+		return undefined;
+	}
+	const key = `${
+		mode === "plan" ? "planMode" : "actMode"
+	}${suffix}` as keyof LegacyGlobalState;
+	const value = legacy[key];
+	return trimNonEmpty(typeof value === "string" ? value : undefined);
+}
+
 function resolveModelForProvider(
 	legacy: LegacyGlobalState,
 	providerId: string,
 	mode: LegacyMode,
 	activeProviderForMode: string | undefined,
 ): string | undefined {
-	const modePrefix = mode === "plan" ? "planMode" : "actMode";
+	const otherMode: LegacyMode = mode === "plan" ? "act" : "plan";
 	const fallbackModel =
 		providerId === activeProviderForMode
 			? trimNonEmpty(
@@ -300,38 +382,39 @@ function resolveModelForProvider(
 						: legacy.actModeApiModelId,
 				)
 			: undefined;
-	const providerModelKeyById: Record<string, keyof LegacyGlobalState> = {
-		openrouter: `${modePrefix}OpenRouterModelId` as keyof LegacyGlobalState,
-		cline: `${modePrefix}ClineModelId` as keyof LegacyGlobalState,
-		openai: `${modePrefix}OpenAiModelId` as keyof LegacyGlobalState,
-		ollama: `${modePrefix}OllamaModelId` as keyof LegacyGlobalState,
-		lmstudio: `${modePrefix}LmStudioModelId` as keyof LegacyGlobalState,
-		litellm: `${modePrefix}LiteLlmModelId` as keyof LegacyGlobalState,
-		requesty: `${modePrefix}RequestyModelId` as keyof LegacyGlobalState,
-		together: `${modePrefix}TogetherModelId` as keyof LegacyGlobalState,
-		fireworks: `${modePrefix}FireworksModelId` as keyof LegacyGlobalState,
-		sapaicore: `${modePrefix}SapAiCoreModelId` as keyof LegacyGlobalState,
-		groq: `${modePrefix}GroqModelId` as keyof LegacyGlobalState,
-		baseten: `${modePrefix}BasetenModelId` as keyof LegacyGlobalState,
-		huggingface: `${modePrefix}HuggingFaceModelId` as keyof LegacyGlobalState,
-		"huawei-cloud-maas":
-			`${modePrefix}HuaweiCloudMaasModelId` as keyof LegacyGlobalState,
-		oca: `${modePrefix}OcaModelId` as keyof LegacyGlobalState,
-		aihubmix: `${modePrefix}AihubmixModelId` as keyof LegacyGlobalState,
-		hicap: `${modePrefix}HicapModelId` as keyof LegacyGlobalState,
-		nousResearch: `${modePrefix}NousResearchModelId` as keyof LegacyGlobalState,
-		"vercel-ai-gateway":
-			`${modePrefix}VercelAiGatewayModelId` as keyof LegacyGlobalState,
-	};
-	const providerModelKey = providerModelKeyById[providerId];
-	const providerModel = providerModelKey
-		? trimNonEmpty(
-				typeof legacy[providerModelKey] === "string"
-					? (legacy[providerModelKey] as string)
-					: undefined,
-			)
-		: undefined;
-	return providerModel ?? fallbackModel;
+	// Prefer the requested mode's provider-specific model id, but fall back to
+	// the other mode's value so a model configured only in one mode survives.
+	return (
+		readProviderModelId(legacy, providerId, mode) ??
+		readProviderModelId(legacy, providerId, otherMode) ??
+		fallbackModel
+	);
+}
+
+/**
+ * Picks the legacy mode whose settings should seed a provider's migrated
+ * entry. A provider active only in the non-current mode (a split Plan/Act
+ * config) must be read through that mode, otherwise its per-mode model and
+ * mode-scoped fields miss and fall back to catalog defaults.
+ */
+function resolveModeForProvider(
+	legacy: LegacyGlobalState,
+	providerId: string,
+	defaultMode: LegacyMode,
+): LegacyMode {
+	const planProvider = trimNonEmpty(legacy.planModeApiProvider);
+	const actProvider = trimNonEmpty(legacy.actModeApiProvider);
+	const defaultModeProvider =
+		defaultMode === "plan" ? planProvider : actProvider;
+	if (providerId === defaultModeProvider) {
+		return defaultMode;
+	}
+	const otherMode: LegacyMode = defaultMode === "plan" ? "act" : "plan";
+	const otherModeProvider = otherMode === "plan" ? planProvider : actProvider;
+	if (providerId === otherModeProvider) {
+		return otherMode;
+	}
+	return defaultMode;
 }
 
 function resolveReasoning(
@@ -452,43 +535,6 @@ function buildLegacyProviderSettings(
 		legacyGlobalState.requestTimeoutMs > 0
 			? legacyGlobalState.requestTimeoutMs
 			: undefined;
-
-	const secretByProvider: Record<string, string | undefined> = {
-		anthropic: legacySecrets.apiKey,
-		cline: legacySecrets.clineApiKey,
-		openai: legacySecrets.openAiApiKey,
-		"openai-native": legacySecrets.openAiNativeApiKey,
-		openrouter: legacySecrets.openRouterApiKey,
-		bedrock: legacySecrets.awsBedrockApiKey,
-		gemini: legacySecrets.geminiApiKey,
-		ollama: legacySecrets.ollamaApiKey,
-		deepseek: legacySecrets.deepSeekApiKey,
-		requesty: legacySecrets.requestyApiKey,
-		together: legacySecrets.togetherApiKey,
-		fireworks: legacySecrets.fireworksApiKey,
-		qwen: legacySecrets.qwenApiKey,
-		doubao: legacySecrets.doubaoApiKey,
-		mistral: legacySecrets.mistralApiKey,
-		litellm: legacySecrets.liteLlmApiKey,
-		asksage: legacySecrets.asksageApiKey,
-		xai: legacySecrets.xaiApiKey,
-		moonshot: legacySecrets.moonshotApiKey,
-		zai: legacySecrets.zaiApiKey,
-		huggingface: legacySecrets.huggingFaceApiKey,
-		nebius: legacySecrets.nebiusApiKey,
-		sambanova: legacySecrets.sambanovaApiKey,
-		cerebras: legacySecrets.cerebrasApiKey,
-		groq: legacySecrets.groqApiKey,
-		"huawei-cloud-maas": legacySecrets.huaweiCloudMaasApiKey,
-		baseten: legacySecrets.basetenApiKey,
-		"vercel-ai-gateway": legacySecrets.vercelAiGatewayApiKey,
-		dify: legacySecrets.difyApiKey,
-		minimax: legacySecrets.minimaxApiKey,
-		hicap: legacySecrets.hicapApiKey,
-		aihubmix: legacySecrets.aihubmixApiKey,
-		nousResearch: legacySecrets.nousResearchApiKey,
-		oca: legacySecrets.ocaApiKey,
-	};
 
 	const providerSpecific: Partial<ProviderSettings> = {};
 	if (providerId === "openai-codex") {
@@ -617,7 +663,10 @@ function buildLegacyProviderSettings(
 		sapaicore: legacyGlobalState.sapAiCoreBaseUrl,
 	};
 
-	const apiKey = trimNonEmpty(secretByProvider[providerId]);
+	const apiKeySecretKey = LEGACY_API_KEY_SECRET_BY_PROVIDER[providerId];
+	const apiKey = apiKeySecretKey
+		? trimNonEmpty(legacySecrets[apiKeySecretKey])
+		: undefined;
 	const baseUrl = trimNonEmpty(baseUrlByProvider[providerId]);
 
 	const settings: ProviderSettings = {
@@ -680,21 +729,19 @@ function collectCandidateProviderIds(
 			candidates.add(provider);
 		}
 	}
-	if (trimNonEmpty(legacySecrets.apiKey)) candidates.add("anthropic");
-	if (trimNonEmpty(legacySecrets.openRouterApiKey))
-		candidates.add("openrouter");
-	if (trimNonEmpty(legacySecrets.openAiApiKey)) {
-		candidates.add(LEGACY_OPENAI_COMPATIBLE_PROVIDER_ID);
+	// Every provider whose legacy API key secret is present is a candidate:
+	// stored credentials must never be silently dropped by the migration.
+	for (const [providerId, secretKey] of Object.entries(
+		LEGACY_API_KEY_SECRET_BY_PROVIDER,
+	)) {
+		if (trimNonEmpty(legacySecrets[secretKey])) {
+			candidates.add(providerId);
+		}
 	}
-	if (trimNonEmpty(legacySecrets.openAiNativeApiKey))
-		candidates.add("openai-native");
 	if (trimNonEmpty(legacySecrets["openai-codex-oauth-credentials"]))
 		candidates.add("openai-codex");
-	if (trimNonEmpty(legacySecrets.geminiApiKey)) candidates.add("gemini");
-	if (trimNonEmpty(legacySecrets.ollamaApiKey)) candidates.add("ollama");
 	if (
 		trimNonEmpty(legacySecrets.awsAccessKey) ||
-		trimNonEmpty(legacySecrets.awsBedrockApiKey) ||
 		legacyGlobalState.awsAuthentication !== undefined ||
 		legacyGlobalState.awsUseProfile === true ||
 		trimNonEmpty(legacyGlobalState.awsProfile)
@@ -706,7 +753,6 @@ function collectCandidateProviderIds(
 	) {
 		candidates.add("vertex");
 	}
-	if (trimNonEmpty(legacySecrets.clineApiKey)) candidates.add("cline");
 	const legacyClineAuth = resolveLegacyClineAuth(
 		trimNonEmpty(legacySecrets["cline:clineAccountId"]),
 	);
@@ -717,7 +763,6 @@ function collectCandidateProviderIds(
 	) {
 		candidates.add("cline");
 	}
-	if (trimNonEmpty(legacySecrets.ocaApiKey)) candidates.add("oca");
 	if (
 		trimNonEmpty(legacySecrets.sapAiCoreClientId) ||
 		trimNonEmpty(legacySecrets.sapAiCoreClientSecret) ||
@@ -768,7 +813,7 @@ export function migrateLegacyProviderSettings(
 			legacyProviderId,
 			globalState,
 			secrets,
-			mode,
+			resolveModeForProvider(globalState, legacyProviderId, mode),
 		);
 		if (!settings) {
 			continue;
