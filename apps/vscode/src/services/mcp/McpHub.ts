@@ -937,10 +937,12 @@ export class McpHub {
 				}
 			} else if (
 				this.configsRequireRestart(JSON.parse(currentConnection.server.config), config) ||
-				this.serverGainedOAuthTokens(currentConnection, config)
+				this.serverGainedOAuthTokens(currentConnection, config) ||
+				this.timeoutChangeRequiresReconnect(currentConnection, config.timeout)
 			) {
 				// Existing server with changed connection config (excludes Cline-specific settings),
-				// or an unauthenticated server whose OAuth tokens just appeared (e.g. CLI authorized it)
+				// an unauthenticated server whose OAuth tokens just appeared (e.g. CLI authorized it),
+				// or a failed server whose timeout changed (connect() is bounded by it)
 				try {
 					if (config.type === "stdio") {
 						this.setupFileWatcher(name, config)
@@ -1010,11 +1012,13 @@ export class McpHub {
 				}
 			} else if (
 				this.configsRequireRestart(JSON.parse(currentConnection.server.config), config) ||
-				this.serverGainedOAuthTokens(currentConnection, config)
+				this.serverGainedOAuthTokens(currentConnection, config) ||
+				this.timeoutChangeRequiresReconnect(currentConnection, config.timeout)
 			) {
 				// Existing server with changed connection config (excludes Cline-specific settings),
-				// or an unauthenticated server whose OAuth tokens just appeared in the settings
-				// file (e.g. the CLI or another window completed authorization for it)
+				// an unauthenticated server whose OAuth tokens just appeared in the settings
+				// file (e.g. the CLI or another window completed authorization for it),
+				// or a failed server whose timeout changed (connect() is bounded by it)
 				try {
 					// Set status to "connecting" and notify webview before restart (same pattern as restartConnection)
 					currentConnection.server.status = "connecting"
@@ -1064,7 +1068,10 @@ export class McpHub {
 	 *
 	 * ## Cline-specific settings (don't require restart):
 	 * - `autoApprove`: tool approval list (UI setting)
-	 * - `timeout`: request timeout (read at request time, not connection time)
+	 * - `timeout`: request timeout, re-read on each request. connect() is
+	 *   bounded by it too, so a change reconnects a server that failed to
+	 *   connect (see timeoutChangeRequiresReconnect) but never restarts a
+	 *   healthy one
 	 *
 	 * ## MCP SDK connection settings (require restart):
 	 * - `type`, `command`, `args`, `cwd`, `env`, `url`, `headers`, `disabled`
@@ -1101,6 +1108,25 @@ export class McpHub {
 			...newConnectionConfig
 		} = newConfig as McpServerConfig & { oauth?: unknown; metadata?: unknown }
 		return !deepEqual(oldConnectionConfig, newConnectionConfig)
+	}
+
+	/**
+	 * True when a changed `timeout` should reconnect a server. The timeout is
+	 * normally request-scoped (excluded from configsRequireRestart), but
+	 * connect() is bounded by it too, so a server that failed to connect
+	 * (e.g. a slow initialize timed out) only benefits from the new value by
+	 * re-running connect. Disabled servers and servers waiting on OAuth are
+	 * left alone — they are down for reasons a timeout cannot fix.
+	 */
+	private timeoutChangeRequiresReconnect(connection: McpConnection, newTimeout: McpServerConfig["timeout"]): boolean {
+		if (connection.server.status !== "disconnected" || connection.server.disabled || connection.server.oauthRequired) {
+			return false
+		}
+		try {
+			return JSON.parse(connection.server.config)?.timeout !== newTimeout
+		} catch {
+			return false
+		}
 	}
 
 	/**
@@ -1703,9 +1729,17 @@ export class McpHub {
 			// Update in-memory config to reflect the new timeout
 			const connection = this.connections.find((conn) => conn.server.name === serverName)
 			if (connection) {
+				const shouldReconnect = this.timeoutChangeRequiresReconnect(connection, timeout)
 				const currentConfig = JSON.parse(connection.server.config)
 				currentConfig.timeout = timeout
 				connection.server.config = JSON.stringify(currentConfig)
+				// connect() is bounded by the timeout, so re-run it for a server
+				// that failed to connect instead of leaving it down until a
+				// manual restart. (The settings watcher skips this window's own
+				// write, so the reconnect must happen here.)
+				if (shouldReconnect) {
+					return this.restartConnectionRPC(serverName)
+				}
 			}
 
 			const serverOrder = Object.keys(config.mcpServers || {})

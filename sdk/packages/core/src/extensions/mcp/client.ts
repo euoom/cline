@@ -178,6 +178,11 @@ class StdioMcpClient implements McpServerClient {
 
 		const attempts: StdioProtocolMode[] = ["newline", "framed"];
 		let lastError: Error | undefined;
+		// One deadline bounds the whole connect so trying both protocol
+		// encodings cannot double the configured budget. A fallback attempt
+		// still gets at least the fast-probe window, so a framed-only server
+		// can answer even after a silent newline attempt consumed the budget.
+		const connectDeadline = Date.now() + this.connectAttemptTimeoutMs;
 
 		for (const protocolMode of attempts) {
 			await this.disconnect().catch(() => {});
@@ -193,7 +198,7 @@ class StdioMcpClient implements McpServerClient {
 							version: "0.0.0",
 						},
 					},
-					this.connectAttemptTimeoutMs,
+					Math.max(connectDeadline - Date.now(), MCP_CONNECT_PROBE_TIMEOUT_MS),
 				);
 				this.notify("notifications/initialized");
 				this.connected = true;
