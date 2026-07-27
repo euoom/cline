@@ -1,7 +1,9 @@
 import fs from "fs/promises"
 import path from "path"
 import * as vscode from "vscode"
+import { readGlobalState, readSecrets, resolveDataDir } from "@/sdk/legacy-state-reader"
 import { Logger } from "@/shared/services/Logger"
+import { SecretKeys } from "@/shared/storage/state-keys"
 import { ensureRulesDirectoryExists } from "./disk"
 
 export async function migrateWorkspaceToGlobalStorage(context: vscode.ExtensionContext) {
@@ -115,87 +117,114 @@ export async function migrateCustomInstructionsToGlobalRules(context: vscode.Ext
 	}
 }
 
-export async function migrateWelcomeViewCompleted(context: vscode.ExtensionContext) {
+// Secrets that exist for reasons other than a configured LLM provider. Their
+// presence alone doesn't mean the user has completed provider setup.
+const NON_PROVIDER_SECRET_KEYS: ReadonlySet<string> = new Set(["authNonce", "mcpOAuthSecrets"])
+
+// Provider configurations that live in global state rather than secrets
+// (local providers, cloud configs without an API key, VS Code LM). Same set
+// the pre-SDK welcome view used to decide whether setup was complete.
+const PROVIDER_CONFIG_GLOBAL_STATE_KEYS = [
+	"awsRegion",
+	"vertexProjectId",
+	"planModeOllamaModelId",
+	"planModeLmStudioModelId",
+	"actModeOllamaModelId",
+	"actModeLmStudioModelId",
+	"planModeVsCodeLmModelSelector",
+	"actModeVsCodeLmModelSelector",
+] as const
+
+/**
+ * Check whether the SDK's providers.json contains any configured provider.
+ * Read directly (rather than through ProviderSettingsManager) so this early
+ * migration step has no side effects — constructing the manager triggers the
+ * SDK's own legacy migration and populates a process-wide singleton cache.
+ */
+async function hasConfiguredSdkProviders(dataDir?: string): Promise<boolean> {
+	try {
+		const providersPath = path.join(resolveDataDir(dataDir), "settings", "providers.json")
+		const parsed = JSON.parse(await fs.readFile(providersPath, "utf8")) as { providers?: Record<string, unknown> }
+		return Object.keys(parsed?.providers ?? {}).length > 0
+	} catch {
+		// Missing or unreadable file — no providers configured there.
+		return false
+	}
+}
+
+/**
+ * One-time backfill of the `welcomeViewCompleted` flag for users upgrading
+ * from builds that didn't persist it.
+ *
+ * Provider configuration may live in any of three places, all of which must
+ * be considered:
+ * - VS Code's per-profile stores (`context.secrets` / `context.globalState`) — pre-4.x builds
+ * - the shared file-backed stores (`~/.cline/data/globalState.json` + `secrets.json`) — 4.x builds
+ * - the SDK's `~/.cline/data/settings/providers.json` — SDK-based clients (e.g. the CLI)
+ *
+ * Checking only the VS Code stores (the pre-SDK behavior) marked fully
+ * migrated users with file-backed config as `welcomeViewCompleted: false`,
+ * pushing them back through onboarding on upgrade.
+ *
+ * @param dataDir Override for the Cline data directory (tests only).
+ */
+export async function migrateWelcomeViewCompleted(context: vscode.ExtensionContext, dataDir?: string) {
 	try {
 		// Check if welcomeViewCompleted is already set
 		const welcomeViewCompleted = context.globalState.get("welcomeViewCompleted")
-
-		if (welcomeViewCompleted === undefined) {
-			Logger.log("Migrating welcomeViewCompleted setting...")
-
-			// Fetch API keys directly from secrets
-			const apiKey = await context.secrets.get("apiKey")
-			const openRouterApiKey = await context.secrets.get("openRouterApiKey")
-			const clineAccountId = await context.secrets.get("clineAccountId")
-			const openAiApiKey = await context.secrets.get("openAiApiKey")
-			const ollamaApiKey = await context.secrets.get("ollamaApiKey")
-			const liteLlmApiKey = await context.secrets.get("liteLlmApiKey")
-			const geminiApiKey = await context.secrets.get("geminiApiKey")
-			const openAiNativeApiKey = await context.secrets.get("openAiNativeApiKey")
-			const deepSeekApiKey = await context.secrets.get("deepSeekApiKey")
-			const requestyApiKey = await context.secrets.get("requestyApiKey")
-			const togetherApiKey = await context.secrets.get("togetherApiKey")
-			const qwenApiKey = await context.secrets.get("qwenApiKey")
-			const doubaoApiKey = await context.secrets.get("doubaoApiKey")
-			const mistralApiKey = await context.secrets.get("mistralApiKey")
-			const asksageApiKey = await context.secrets.get("asksageApiKey")
-			const xaiApiKey = await context.secrets.get("xaiApiKey")
-			const sambanovaApiKey = await context.secrets.get("sambanovaApiKey")
-			const sapAiCoreClientId = await context.secrets.get("sapAiCoreClientId")
-			const difyApiKey = await context.secrets.get("difyApiKey")
-			const hicapApiKey = await context.secrets.get("hicapApiKey")
-			// OpenAI Codex OAuth credentials
-			const openAiCodexCredentials = await context.secrets.get("openai-codex-oauth-credentials")
-
-			// Fetch configuration values from global state
-			const awsRegion = context.globalState.get("awsRegion")
-			const vertexProjectId = context.globalState.get("vertexProjectId")
-			const planModeOllamaModelId = context.globalState.get("planModeOllamaModelId")
-			const planModeLmStudioModelId = context.globalState.get("planModeLmStudioModelId")
-			const actModeOllamaModelId = context.globalState.get("actModeOllamaModelId")
-			const actModeLmStudioModelId = context.globalState.get("actModeLmStudioModelId")
-			const planModeVsCodeLmModelSelector = context.globalState.get("planModeVsCodeLmModelSelector")
-			const actModeVsCodeLmModelSelector = context.globalState.get("actModeVsCodeLmModelSelector")
-
-			// This is the original logic used for checking if the welcome view should be shown
-			// It was located in the ExtensionStateContextProvider
-			const hasKey = [
-				apiKey,
-				openRouterApiKey,
-				awsRegion,
-				vertexProjectId,
-				openAiApiKey,
-				ollamaApiKey,
-				planModeOllamaModelId,
-				planModeLmStudioModelId,
-				actModeOllamaModelId,
-				actModeLmStudioModelId,
-				liteLlmApiKey,
-				geminiApiKey,
-				openAiNativeApiKey,
-				deepSeekApiKey,
-				requestyApiKey,
-				togetherApiKey,
-				qwenApiKey,
-				doubaoApiKey,
-				mistralApiKey,
-				planModeVsCodeLmModelSelector,
-				actModeVsCodeLmModelSelector,
-				clineAccountId,
-				asksageApiKey,
-				xaiApiKey,
-				sambanovaApiKey,
-				sapAiCoreClientId,
-				difyApiKey,
-				hicapApiKey,
-				openAiCodexCredentials,
-			].some((key) => key !== undefined)
-
-			// Set welcomeViewCompleted based on whether user has keys
-			await context.globalState.update("welcomeViewCompleted", hasKey)
-
-			Logger.log(`Migration: Set welcomeViewCompleted to ${hasKey} based on existing API keys`)
+		if (welcomeViewCompleted !== undefined) {
+			return
 		}
+
+		Logger.log("Migrating welcomeViewCompleted setting...")
+
+		// The file-backed global state is the runtime source of truth and may
+		// already carry the flag (written by the legacy 4.x extension). Mirror
+		// it instead of recomputing so an onboarded user is never sent back
+		// through the welcome view.
+		const fileGlobalState = readGlobalState(dataDir)
+		if (fileGlobalState.welcomeViewCompleted !== undefined) {
+			await context.globalState.update("welcomeViewCompleted", fileGlobalState.welcomeViewCompleted)
+			Logger.log(
+				`Migration: Mirrored welcomeViewCompleted=${fileGlobalState.welcomeViewCompleted} from file-backed global state`,
+			)
+			return
+		}
+
+		// Any provider secret in either store means setup was completed.
+		const fileSecrets: Record<string, string | undefined> = readSecrets(dataDir)
+		let hasKey = Object.entries(fileSecrets).some(([key, value]) => !NON_PROVIDER_SECRET_KEYS.has(key) && !!value)
+
+		if (!hasKey) {
+			for (const key of SecretKeys) {
+				if (NON_PROVIDER_SECRET_KEYS.has(key)) {
+					continue
+				}
+				const value = await context.secrets.get(key)
+				if (value) {
+					hasKey = true
+					break
+				}
+			}
+		}
+
+		// Keyless provider configurations stored in global state (either store).
+		if (!hasKey) {
+			hasKey = PROVIDER_CONFIG_GLOBAL_STATE_KEYS.some(
+				(key) => context.globalState.get(key) !== undefined || fileGlobalState[key] !== undefined,
+			)
+		}
+
+		// Providers configured through the SDK (e.g. via the CLI, or an
+		// already-completed migration to providers.json).
+		if (!hasKey) {
+			hasKey = await hasConfiguredSdkProviders(dataDir)
+		}
+
+		// Set welcomeViewCompleted based on whether user has keys
+		await context.globalState.update("welcomeViewCompleted", hasKey)
+
+		Logger.log(`Migration: Set welcomeViewCompleted to ${hasKey} based on existing provider configuration`)
 	} catch (error) {
 		Logger.error("Failed to migrate welcomeViewCompleted:", error)
 		// Continue execution - migration failure shouldn't break extension startup
