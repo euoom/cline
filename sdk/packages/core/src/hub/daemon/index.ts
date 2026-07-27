@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
 	CLINE_RUN_AS_HUB_DAEMON_ENV,
 	isHubDaemonProcess,
@@ -31,6 +30,10 @@ import {
 	resolveProductionHubOwnerContext,
 	resolveSharedHubOwnerContext,
 } from "../discovery/workspace";
+import {
+	COMPILED_BUN_EMBEDDED_PATH_PREFIX,
+	resolveHubDaemonEntryPath,
+} from "./entry-path";
 
 const HUB_STARTUP_TIMEOUT_MS = 8_000;
 const HUB_STARTUP_POLL_MS = 200;
@@ -161,11 +164,6 @@ async function retireLegacySharedHub(owner: HubOwnerContext): Promise<void> {
 	}
 }
 
-function resolveDaemonEntryPath(): string {
-	const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
-	return fileURLToPath(new URL(`./entry.${extension}`, import.meta.url));
-}
-
 function resolveLaunchCommand(
 	workspaceRoot: string,
 	endpoint: HubEndpointOverrides,
@@ -175,13 +173,15 @@ function resolveLaunchCommand(
 	cwd: string;
 	env: NodeJS.ProcessEnv;
 } {
-	const daemonEntryPath = resolveDaemonEntryPath();
+	const daemonEntryPath = resolveHubDaemonEntryPath();
 	const execPath = process.execPath?.trim();
 	if (!execPath) {
 		throw new Error("unable to resolve runtime executable for hub daemon");
 	}
 	const isBunRuntime = basename(execPath).toLowerCase().includes("bun");
-	const isCompiledBunEmbeddedEntry = daemonEntryPath.startsWith("/$bunfs/");
+	const isCompiledBunEmbeddedEntry = daemonEntryPath.startsWith(
+		COMPILED_BUN_EMBEDDED_PATH_PREFIX,
+	);
 	const useDevelopmentConditions =
 		isBunRuntime && daemonEntryPath.toLowerCase().endsWith(".ts");
 	const entryArgs = isCompiledBunEmbeddedEntry
