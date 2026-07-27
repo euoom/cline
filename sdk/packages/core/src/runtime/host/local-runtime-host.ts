@@ -456,7 +456,7 @@ export class LocalRuntimeHost implements RuntimeHost {
 		let existingMetadataOnContinuation: Record<string, unknown> | undefined;
 		if (
 			!resumedArtifacts &&
-			requestedSessionId.length > 0 &&
+			wasSessionIdRequested &&
 			initialMessages.length > 0
 		) {
 			const existingManifestForContinuation =
