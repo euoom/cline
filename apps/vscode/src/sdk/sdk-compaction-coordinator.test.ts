@@ -282,6 +282,33 @@ describe("SdkCompactionCoordinator", () => {
 		expect(rows[rows.length - 1].info).toMatchObject({ status: "completed", messagesBefore: 2, messagesAfter: 1 })
 	})
 
+	it("waits for an in-flight stop of the same sessionId before resuming it in the isolated host", async () => {
+		const { coordinator, options, resumedHost } = makeCoordinator({
+			activeSession: undefined,
+			displayedTaskId: "history-task",
+		})
+		// Simulate the fire-and-forget stop from showTaskWithId still being in
+		// flight: the isolated resume must not start until it settles.
+		let stopSettled = false
+		options.sessions.waitForPendingStop.mockImplementation(async () => {
+			await Promise.resolve()
+			stopSettled = true
+		})
+		let stopSettledAtStart: boolean | undefined
+		resumedHost.start.mockImplementationOnce(async (input: { config?: { sessionId?: string } }) => {
+			stopSettledAtStart = stopSettled
+			return { sessionId: input.config?.sessionId ?? "resumed-session" }
+		})
+		mockCreateContextCompactionPrepareTurn.mockReturnValueOnce(
+			vi.fn().mockResolvedValue({ messages: [{ role: "user", content: "summary" }] }),
+		)
+
+		await coordinator.compactTask()
+
+		expect(options.sessions.waitForPendingStop).toHaveBeenCalledWith("history-task")
+		expect(stopSettledAtStart).toBe(true)
+	})
+
 	it("disposes the isolated session even when displayed-task compaction fails", async () => {
 		const { coordinator, options, resumedHost } = makeCoordinator({
 			activeSession: undefined,
@@ -391,6 +418,7 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 			})),
 			setRunning: vi.fn(),
 			endActiveSession: vi.fn().mockResolvedValue(undefined),
+			waitForPendingStop: vi.fn().mockResolvedValue(undefined),
 		},
 		rebuilds: {
 			runExclusive: vi.fn(async (operation: () => Promise<unknown>) => operation()),
@@ -417,6 +445,7 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 			startNewSession: ReturnType<typeof vi.fn>
 			setRunning: ReturnType<typeof vi.fn>
 			endActiveSession: ReturnType<typeof vi.fn>
+			waitForPendingStop: ReturnType<typeof vi.fn>
 		}
 		rebuilds: { runExclusive: ReturnType<typeof vi.fn> }
 		messages: { appendAndEmit: ReturnType<typeof vi.fn> }

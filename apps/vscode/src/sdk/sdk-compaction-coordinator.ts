@@ -162,6 +162,14 @@ export class SdkCompactionCoordinator {
 				return
 			}
 
+			// Opening a task from history ends its session fire-and-forget
+			// (showTaskWithId), so a stop for this sessionId may still be in
+			// flight. Honor the lifecycle's stop-before-start contract — as
+			// startNewSession does — before reading the transcript and resuming
+			// the same sessionId in an isolated host, otherwise the late stop's
+			// cleanup can race the resumed session's on-disk state.
+			await this.options.sessions.waitForPendingStop(taskId)
+
 			const resumeStart = await prepareTaskResumeStartInput(this.options, taskId)
 			if (this.options.sessions.getActiveSession() || this.options.getDisplayedTaskId() !== taskId) {
 				Logger.log(`[SdkController] compactTask: Target changed before resuming ${taskId}; cancelling`)

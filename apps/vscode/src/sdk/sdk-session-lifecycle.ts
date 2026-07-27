@@ -126,6 +126,20 @@ export class SdkSessionLifecycle {
 		return true
 	}
 
+	/**
+	 * Waits for an in-flight stop of `sessionId`, if any. Callers that start a
+	 * same-id session outside startNewSession (e.g. the compaction
+	 * coordinator's isolated resume) use this to honor the same
+	 * stop-before-start contract; see pendingStops.
+	 */
+	async waitForPendingStop(sessionId: string): Promise<void> {
+		const pendingStop = this.pendingStops.get(sessionId)
+		if (pendingStop) {
+			Logger.log(`[SdkController] Waiting for session ${sessionId} to stop before restarting it`)
+			await pendingStop
+		}
+	}
+
 	async startNewSession(
 		startInput: Parameters<VscodeSessionHost["start"]>[0],
 	): Promise<{ startResult: StartSessionResult; sdkHost: SdkSessionHost }> {
@@ -136,10 +150,8 @@ export class SdkSessionLifecycle {
 		// Same-id starts must wait for the previous session's stop to finish;
 		// see pendingStops. A fresh id cannot conflict, so it never waits.
 		const requestedSessionId = startInput.config?.sessionId?.trim()
-		const pendingStop = requestedSessionId ? this.pendingStops.get(requestedSessionId) : undefined
-		if (pendingStop) {
-			Logger.log(`[SdkController] Waiting for session ${requestedSessionId} to stop before restarting it`)
-			await pendingStop
+		if (requestedSessionId) {
+			await this.waitForPendingStop(requestedSessionId)
 		}
 
 		const autoApprovalSettings = StateManager.get().getGlobalSettingsKey("autoApprovalSettings")
