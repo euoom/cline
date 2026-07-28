@@ -123,7 +123,7 @@ export class VscodeSessionHost implements SdkSessionHost {
 		}
 
 		const inner = await ClineCore.create({
-			backendMode: "local",
+			backendMode: "hub",
 			capabilities: {
 				requestToolApproval: options.requestToolApproval as
 					| ((request: ToolApprovalRequest) => Promise<ToolApprovalResult>)
