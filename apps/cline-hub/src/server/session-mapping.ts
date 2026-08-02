@@ -408,7 +408,7 @@ export function trackSession(record: unknown): TrackedSession | undefined {
 		workspaceRoot: asString(raw.workspaceRoot) ?? asString(raw.cwd) ?? "",
 		cwd: asString(raw.cwd),
 		provider: asString(raw.provider) ?? asString(metadata.provider),
-		model: asString(raw.model) ?? asString(metadata.model),
+		model: asString(raw.model) ?? asString(metadata.modelId) ?? asString(metadata.model),
 		source: asString(raw.source) ?? asString(metadata.source),
 		createdAt,
 		updatedAt:
@@ -546,8 +546,8 @@ export function parseSessionContext(
 		asString(metadata.provider);
 	const modelId =
 		asString(raw.modelId) ??
-		asString(metadata.modelId) ??
 		asString(raw.model) ??
+		asString(metadata.modelId) ??
 		asString(metadata.model);
 	if (!workspaceRootRaw || !providerId || !modelId) return undefined;
 	return {

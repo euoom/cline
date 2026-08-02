@@ -185,6 +185,16 @@ export async function startClineHubDashboardServer(): Promise<ClineHubDashboardS
 						await initializePeer(ctx, peer, syncClientsAndSessions);
 					} else if (frame.type === "loadModels") {
 						await loadModels(ctx, peer, frame.providerId);
+					} else if (frame.type === "updateSessionModel") {
+						if (!ctx.cline) throw new Error("Hub is not connected.");
+						if (peer.sending && peer.selectedSessionId === frame.sessionId) {
+							throw new Error("Model changes are applied after the current turn finishes.");
+						}
+						await ctx.cline.updateSessionConnection(frame.sessionId, {
+							modelId: frame.modelId,
+						});
+						await syncHubClientsAndSessions(ctx);
+						broadcastHubState(ctx);
 					} else if (frame.type === "loadProviderCatalog") {
 						await sendProviderCatalog(ctx, peer);
 					} else if (frame.type === "saveProviderSettings") {
@@ -221,6 +231,17 @@ export async function startClineHubDashboardServer(): Promise<ClineHubDashboardS
 							});
 							return;
 						}
+						// The web client owns the currently selected model.  A session can
+						// outlive that selection, so synchronize it immediately before the
+						// next turn rather than relying on a separate UI event arriving first.
+						const selectedModel = frame.config?.model;
+						if (ctx.cline && peer.selectedSessionId && selectedModel) {
+							await ctx.cline.updateSessionConnection(peer.selectedSessionId, {
+								modelId: selectedModel,
+							});
+							await syncClientsAndSessions();
+							broadcastHubState(ctx);
+						}
 						peer.sending = true;
 						try {
 							await sendMessage(
@@ -229,6 +250,7 @@ export async function startClineHubDashboardServer(): Promise<ClineHubDashboardS
 								frame.prompt,
 								frame.config,
 								frame.attachments,
+								syncClientsAndSessions,
 							);
 						} finally {
 							peer.sending = false;

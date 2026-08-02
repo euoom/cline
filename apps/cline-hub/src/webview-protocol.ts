@@ -252,6 +252,7 @@ export type WebviewInboundMessage =
 			reason?: string;
 	  }
 	| { type: "loadModels"; providerId: string }
+	| { type: "updateSessionModel"; sessionId: string; modelId: string }
 	| { type: "loadProviderCatalog" }
 	| {
 			type: "saveProviderSettings";

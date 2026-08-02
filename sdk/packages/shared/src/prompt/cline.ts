@@ -150,10 +150,20 @@ export function buildClineSystemPrompt(
 		.filter(Boolean)
 		.join("\n\n");
 
+	const now = new Date();
+	const kstDate = now.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" });
+	const kstTime = now.toLocaleString("ko-KR", {
+		timeZone: "Asia/Seoul",
+		dateStyle: "full",
+		timeStyle: "medium",
+		hour12: false,
+	});
+
 	return basePrompt
 		.replace("{{PLATFORM_NAME}}", platform)
 		.replace("{{CWD}}", workspaceRoot)
-		.replace("{{CURRENT_DATE}}", new Date().toLocaleDateString())
+		.replace("{{CURRENT_DATE}}", kstDate)
+		.replace("{{CURRENT_TIME_KST}}", kstTime)
 		.replace("{{IDE_NAME}}", ide)
 		.replace(
 			"{{CLINE_METADATA}}",

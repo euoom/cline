@@ -1,6 +1,7 @@
 import process from "node:process";
 import {
 	type ClineCoreStartInput,
+	isSessionNotFoundError,
 	type SessionRecord,
 	SessionSource,
 } from "@cline/core";
@@ -192,14 +193,18 @@ export async function selectSession(
 ): Promise<void> {
 	peer.selectedSessionId = sessionId;
 	const tracked = ctx.sessions.get(sessionId);
+	// The Hub's summary metadata can lag behind a connection change. Read the
+	// canonical session record when hydrating so a refresh restores the model
+	// actually used by the latest turn.
+	const saved = ctx.cline ? await ctx.cline.get(sessionId) : undefined;
 	const history = await loadHistoryFor(ctx, sessionId);
 	ctx.send(peer, { type: "session_started", sessionId });
 	ctx.send(peer, {
 		type: "session_hydrated",
 		sessionId,
 		status: tracked?.status,
-		providerId: tracked?.provider,
-		modelId: tracked?.model,
+		providerId: saved?.provider ?? tracked?.provider,
+		modelId: saved?.model ?? tracked?.model,
 		messages: mapHistoryToWebviewMessages(history),
 	});
 }
@@ -267,18 +272,43 @@ export async function sendMessage(
 	text: string,
 	config?: WebviewConfig,
 	attachments?: { userImages?: string[] },
+	syncHubClientsAndSessions?: () => Promise<void>,
 ): Promise<void> {
 	if (!ctx.cline) throw new Error("Hub is not connected.");
 	if (!peer.selectedSessionId) {
 		await createSession(ctx, peer, text, config, attachments);
 		return;
 	}
-	await ctx.cline.send({
-		sessionId: peer.selectedSessionId,
-		prompt: text,
-		mode: config?.mode === "plan" ? "plan" : "act",
-		userImages: attachments?.userImages,
-	});
+	const send = () =>
+		ctx.cline!.send({
+			sessionId: peer.selectedSessionId!,
+			prompt: text,
+			mode: config?.mode === "plan" ? "plan" : "act",
+			userImages: attachments?.userImages,
+		});
+	try {
+		await send();
+	} catch (error) {
+		if (!isSessionNotFoundError(error) || !syncHubClientsAndSessions) {
+			throw error;
+		}
+		// A Hub daemon restart keeps transcript files but discards its in-memory
+		// runtime. Recreate the runtime from the saved transcript, then retry the
+		// user's message against that replacement session.
+		const resumed = await forkPeerSession(
+			ctx,
+			peer,
+			syncHubClientsAndSessions,
+		);
+		if (!resumed) {
+			throw error;
+		}
+		ctx.send(peer, {
+			type: "status",
+			text: "Hub was restarted. Continuing this conversation in a restored runtime session.",
+		});
+		await send();
+	}
 }
 
 export async function deleteSession(
@@ -338,12 +368,12 @@ export async function forkPeerSession(
 	ctx: HubContext,
 	peer: BrowserPeer,
 	syncHubClientsAndSessions: () => Promise<void>,
-): Promise<void> {
+): Promise<boolean> {
 	if (!ctx.cline) throw new Error("Hub is not connected.");
 	const forkedFromSessionId = peer.selectedSessionId;
 	if (!forkedFromSessionId) {
 		ctx.send(peer, { type: "fork_error", text: "No active session to fork." });
-		return;
+		return false;
 	}
 	try {
 		const rawMessages = (await ctx.cline.readMessages(
@@ -354,7 +384,7 @@ export async function forkPeerSession(
 				type: "fork_error",
 				text: "Cannot fork an empty session.",
 			});
-			return;
+			return false;
 		}
 		const sourceSession = await ctx.cline.get(forkedFromSessionId);
 		if (!sourceSession) {
@@ -362,7 +392,7 @@ export async function forkPeerSession(
 				type: "fork_error",
 				text: `Session ${forkedFromSessionId} was not found.`,
 			});
-			return;
+			return false;
 		}
 		const checkpointMetadata = sourceSession.metadata?.checkpoint;
 		const result = await ctx.cline.start(
@@ -401,11 +431,13 @@ export async function forkPeerSession(
 		});
 		await syncHubClientsAndSessions();
 		broadcastHubState(ctx);
+		return true;
 	} catch (error) {
 		ctx.send(peer, {
 			type: "fork_error",
 			text: error instanceof Error ? error.message : String(error),
 		});
+		return false;
 	}
 }
 

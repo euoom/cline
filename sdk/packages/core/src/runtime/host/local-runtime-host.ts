@@ -817,6 +817,10 @@ export class LocalRuntimeHost implements RuntimeHost {
 			active.compactionState = undefined;
 		}
 		this.sessions.set(sessionId, active);
+		// Hub clients update the title and task metadata immediately after
+		// `session.create`, before the first `run.start`. Persist the session
+		// here so that metadata updates do not race a later turn execution.
+		await this.ensureSessionPersisted(active);
 		if (resumedArtifacts) {
 			await this.refreshActiveSessionGitMetadata(active, bootstrap.gitState);
 		}

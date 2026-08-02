@@ -8,8 +8,9 @@ Environment you are running in:
 <env>
 1. Platform: {{PLATFORM_NAME}}
 2. Date: {{CURRENT_DATE}}
-3. IDE: {{IDE_NAME}}
-4. Working Directory: {{CWD}}
+3. Current time (KST): {{CURRENT_TIME_KST}}
+4. IDE: {{IDE_NAME}}
+5. Working Directory: {{CWD}}
 </env>
 
 Remember:
@@ -53,8 +54,9 @@ Environment you are running in:
 <env>
 1. Platform: {{PLATFORM_NAME}}
 2. Date: {{CURRENT_DATE}}
-3. IDE: {{IDE_NAME}}
-4. Working Directory: {{CWD}}
+3. Current time (KST): {{CURRENT_TIME_KST}}
+4. IDE: {{IDE_NAME}}
+5. Working Directory: {{CWD}}
 </env>
 
 IMPORTANT: 

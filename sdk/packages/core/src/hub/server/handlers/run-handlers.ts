@@ -198,6 +198,16 @@ export async function handleSessionInput(
 			"session input requires a prompt string",
 		);
 	}
+	// Interactive clients create an empty session first and send the first user
+	// prompt through `run.start`. Store that first prompt so session lists have a
+	// useful title; later follow-ups deliberately keep the original task title.
+	const existingSession = await ctx.sessionHost.getSession(sessionId);
+	if (!existingSession) {
+		return sessionNotFoundReply(envelope, sessionId);
+	}
+	if (!existingSession.prompt?.trim()) {
+		await ctx.sessionHost.updateSession(sessionId, { prompt });
+	}
 	ctx.publish(ctx.buildEvent("run.started", undefined, sessionId));
 	const attachments =
 		payload.attachments &&

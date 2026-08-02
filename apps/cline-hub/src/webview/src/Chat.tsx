@@ -741,6 +741,7 @@ export default function Chat({
 	const [forking, setForking] = useState(false);
 	const [forkError, setForkError] = useState<string | null>(null);
 	const activeAssistantIdRef = useRef<string | undefined>(undefined);
+	const pendingSessionModelRef = useRef<string | undefined>(undefined);
 	const initialSessionIdRef = useRef<string | undefined>(undefined);
 	const hydratingSessionIdRef = useRef<string | undefined>(undefined);
 	const sessionIdRef = useRef<string | undefined>(undefined);
@@ -1059,6 +1060,14 @@ export default function Chat({
 			postToHost({ type: "loadModels", providerId: provider });
 		}
 	}, [provider]);
+
+	useEffect(() => {
+		const pendingModel = pendingSessionModelRef.current;
+		if (!pendingModel || sending || !sessionId) return;
+		pendingSessionModelRef.current = undefined;
+		postToHost({ type: "updateSessionModel", sessionId, modelId: pendingModel });
+		setStatus(`Model changed to ${pendingModel}.`);
+	}, [sending, sessionId]);
 
 	useEffect(() => {
 		if (!provider || !model) {
@@ -1391,7 +1400,17 @@ export default function Chat({
 					onEnableToolsChange={setEnableTools}
 					onModeChange={setMode}
 					onMaxIterationsChange={setMaxIterations}
-					onModelChange={setModel}
+					onModelChange={(nextModel) => {
+						setModel(nextModel);
+						if (!sessionId) return;
+						if (sending) {
+							pendingSessionModelRef.current = nextModel;
+							setStatus(`Model change to ${nextModel} will apply after this turn.`);
+							return;
+						}
+						postToHost({ type: "updateSessionModel", sessionId, modelId: nextModel });
+						setStatus(`Model changed to ${nextModel}.`);
+					}}
 					onModelSelectorOpenChange={setModelSelectorOpen}
 					onProviderChange={(nextProvider) => {
 						setProvider(nextProvider);
